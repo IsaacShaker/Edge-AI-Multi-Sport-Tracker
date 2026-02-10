@@ -1,0 +1,1 @@
+This folder is for embedded code for our embedded motor control hardware (arduino, stm32)
