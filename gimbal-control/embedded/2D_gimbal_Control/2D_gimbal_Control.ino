@@ -23,7 +23,7 @@ BLDCDriver3PWM driverBottom = BLDCDriver3PWM(1, 2, 3, 0);  // PWM pins + enable
 // ADJUST these values to match your top motor specs!
 // Using same motor type as bottom as placeholder
 BLDCMotor motorTop = BLDCMotor(7, 2.3, 220, 0.00086);
-BLDCDriver3PWM driverTop = BLDCDriver3PWM(6, 7, 8, 5);  // PWM pins + enable
+BLDCDriver3PWM driverTop = BLDCDriver3PWM(6,7,8,5);  // PWM pins + enable
 // ^^^ CHANGE THESE PINS to match your wiring!
 
 // =====================================================
@@ -90,7 +90,7 @@ void setup() {
   motorBottom.controller = MotionControlType::angle;
 
   // Velocity PID
-  motorBottom.PID_velocity.P = 0.05f;
+  motorBottom.PID_velocity.P = 0.7f;
   motorBottom.PID_velocity.I = 0;
   motorBottom.PID_velocity.D = 0;
   motorBottom.PID_velocity.output_ramp = 100;
@@ -121,7 +121,7 @@ void setup() {
 
   // Velocity PID - may need different tuning for tilt axis
   // (tilt axis often has different load/inertia than pan)
-  motorTop.PID_velocity.P = 0.05f;
+  motorTop.PID_velocity.P = 0.07f;
   motorTop.PID_velocity.I = 0;
   motorTop.PID_velocity.D = 0;
   motorTop.PID_velocity.output_ramp = 100;
