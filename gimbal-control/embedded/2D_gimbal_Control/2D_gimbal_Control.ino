@@ -90,7 +90,7 @@ void setup() {
   motorBottom.controller = MotionControlType::angle;
 
   // Velocity PID
-  motorBottom.PID_velocity.P = 0.7f;
+  motorBottom.PID_velocity.P = 0.5f;
   motorBottom.PID_velocity.I = 0;
   motorBottom.PID_velocity.D = 0;
   motorBottom.PID_velocity.output_ramp = 100;
@@ -121,7 +121,7 @@ void setup() {
 
   // Velocity PID - may need different tuning for tilt axis
   // (tilt axis often has different load/inertia than pan)
-  motorTop.PID_velocity.P = 0.07f;
+  motorTop.PID_velocity.P = 0.05f;
   motorTop.PID_velocity.I = 0;
   motorTop.PID_velocity.D = 0;
   motorTop.PID_velocity.output_ramp = 100;
