@@ -1,5 +1,5 @@
 """
-Ball Tracking with OpenCV + Adaptive IMM Kalman Filter
+Ball Tracking with Open CV + Adaptive IMM Kalman Filter
 ======================================================
 Improved version with better detection at distance:
   - Adaptive minimum radius based on recent detections
@@ -12,11 +12,46 @@ Improved version with better detection at distance:
 Press 'q' to quit — benchmark summary prints to the console.
 """
 
+import os
+import sys
+
+# Configure display backend before importing cv2
+if sys.platform in ['linux', 'linux2']:
+    session_type = os.environ.get('XDG_SESSION_TYPE', '').lower()
+    
+    # For Wayland sessions, use XWayland (X11 compatibility layer)
+    # Most opencv-python builds use Qt with XCB, not native Wayland
+    if session_type == 'wayland':
+        os.environ.setdefault('QT_QPA_PLATFORM', 'xcb')
+    
+    # Suppress Qt debug/warning messages
+    # Note: Some Qt warnings may still appear as they're emitted before logging is configured
+    os.environ['QT_LOGGING_RULES'] = '*.debug=false;qt.qpa.*=false;qt.gui.font*=false'
+    os.environ['QT_DEBUG_PLUGINS'] = '0'
+
+# Suppress specific Qt font warnings by redirecting stderr temporarily
+import io
+import contextlib
+
+# Capture stderr during cv2 import to hide Qt font warnings
+stderr_backup = sys.stderr
+stderr_capture = io.StringIO()
+
+try:
+    sys.stderr = stderr_capture
+    import cv2
+finally:
+    sys.stderr = stderr_backup
+    # Only print errors that aren't Qt font warnings
+    captured = stderr_capture.getvalue()
+    for line in captured.split('\n'):
+        if line and not any(x in line for x in ['QFontDatabase', 'XDG_SESSION_TYPE', 'Qt no longer ships fonts']):
+            print(line, file=sys.stderr)
+
 from collections import deque
 from imutils.video import VideoStream
 import numpy as np
 import argparse
-import cv2
 import imutils
 import time
 import math
@@ -505,6 +540,11 @@ class BenchmarkStats:
 # ──────────────────────────────────────────────
 
 def main():
+    print("=" * 70)
+    print("Ball Tracker — Adaptive IMM Kalman Filter (CV+CA)")
+    print("=" * 70)
+    print("")
+    
     ap = argparse.ArgumentParser()
     ap.add_argument("-v", "--video", help="path to video file (omit for webcam)")
     ap.add_argument("-b", "--buffer", type=int, default=64)
@@ -524,10 +564,34 @@ def main():
     pred_pts = deque(maxlen=args["buffer"])
 
     if not args.get("video", False):
-        vs = VideoStream(src=0).start()
+        print("Attempting to access webcam (camera 0)...")
+        try:
+            vs = VideoStream(src=0).start()
+            time.sleep(2.0)
+            # Test if we can actually read from the camera
+            test_frame = vs.read()
+            if test_frame is None:
+                print("\nERROR: Cannot read from webcam!")
+                print("Solutions:")
+                print("  1. Check if your webcam is connected and accessible")
+                print("  2. Try running with a video file: python {} -v path/to/video.mp4".format(__file__))
+                print("  3. Check camera permissions")
+                vs.stop()
+                return
+            print("Webcam initialized successfully!")
+        except Exception as e:
+            print(f"\nERROR: Failed to initialize webcam: {e}")
+            print("Try running with a video file: python {} -v path/to/video.mp4".format(__file__))
+            return
     else:
+        print(f"Opening video file: {args['video']}")
         vs = cv2.VideoCapture(args["video"])
-    time.sleep(2.0)
+        if not vs.isOpened():
+            print(f"\nERROR: Could not open video file: {args['video']}")
+            print("Please check if the file exists and is a valid video format")
+            return
+        print("Video file opened successfully!")
+        time.sleep(0.5)
 
     # Build the two Kalman models
     cv_model = KalmanModel(
@@ -561,6 +625,17 @@ def main():
 
     bench = BenchmarkStats(lookahead=args["lookahead"])
     frame_idx = 0
+    
+    print("Starting main tracking loop... Press 'q' to quit")
+    print("=" * 70)
+    
+    # Test if we can create a window first
+    try:
+        cv2.namedWindow("Ball Tracker — Adaptive IMM (CV+CA)", cv2.WINDOW_NORMAL)
+        print("Window created successfully!")
+    except Exception as e:
+        print(f"Warning: Could not create window: {e}")
+        print("Continuing anyway...\n")
 
     while True:
         frame = vs.read()
@@ -677,9 +752,19 @@ def main():
             cv2.putText(frame, info, (10, 42),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
 
-        cv2.imshow("Ball Tracker — Adaptive IMM (CV+CA)", frame)
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord("q"):
+        try:
+            cv2.imshow("Ball Tracker — Adaptive IMM (CV+CA)", frame)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
+                break
+        except cv2.error as e:
+            print(f"\n\nERROR: Cannot display window!")
+            print(f"Details: {e}")
+            print("\nThis script requires a display. Possible solutions:")
+            print("  1. If running via SSH: use X11 forwarding (ssh -X user@host)")
+            print("  2. Set DISPLAY environment variable correctly")
+            print("  3. Use a headless version of OpenCV")
+            print("\nExiting...")
             break
 
         frame_idx += 1

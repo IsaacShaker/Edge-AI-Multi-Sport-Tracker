@@ -1,0 +1,10 @@
+# Core dependencies - flexible versions for Python 3.8+
+numpy>=1.21.0
+opencv-python>=4.5.0
+imutils>=0.5.4
+ultralytics>=8.0.0
+pyserial>=3.5
+
+# Deep Learning - will auto-install compatible versions
+torch>=2.0.0
+torchvision>=0.15.0

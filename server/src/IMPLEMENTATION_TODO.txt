@@ -1,0 +1,30 @@
+# Placeholder implementations
+# These files need to be implemented based on the interfaces
+
+add_library(vision_stubs OBJECT
+    vision_detector_base.cpp
+    color_based_detector.cpp
+    yolo_detector.cpp
+)
+
+add_library(estimation_stubs OBJECT
+    state_estimator_base.cpp
+    kalman_filter_cv.cpp
+    kalman_filter_ca.cpp
+    imm_estimator.cpp
+    distance_estimator.cpp
+)
+
+add_library(motor_stubs OBJECT
+    motor_controller_base.cpp
+    simplefoc_controller.cpp
+)
+
+add_library(streaming_stubs OBJECT
+    websocket_server.cpp
+    mjpeg_streamer.cpp
+)
+
+add_library(core_stubs OBJECT
+    config_manager.cpp
+)
