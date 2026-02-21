@@ -62,7 +62,7 @@ Thumbs.db
 *.onnx
 *.pth
 *.weights
-!yolov8n.pt
+!python/training/yolov8n.pt
 
 # Video/Image test data
 *.mp4

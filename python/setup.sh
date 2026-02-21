@@ -97,10 +97,10 @@ fi
 
 # Download YOLOv8 weights if not present
 echo "Checking YOLOv8 weights..."
-if [ ! -f "yolov8n.pt" ]; then
+if [ ! -f "training/yolov8n.pt" ]; then
     echo "YOLOv8n weights not found. They will be downloaded automatically on first run."
 else
-    echo "YOLOv8n weights found: yolov8n.pt"
+    echo "YOLOv8n weights found: training/yolov8n.pt"
 fi
 echo ""
 

@@ -22,8 +22,13 @@ brew install cmake opencv
 
 ```bash
 # From repository root
-chmod +x build.sh
-./build.sh
+chmod +x 1-install-dependencies.sh 2-rebuild-opencv-qt.sh 3-build.sh 4-run.sh
+
+# Follow the numbered workflow
+./1-install-dependencies.sh
+./2-rebuild-opencv-qt.sh
+./3-build.sh
+./4-run.sh
 ```
 
 This will:

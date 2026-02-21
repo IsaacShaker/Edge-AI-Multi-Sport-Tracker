@@ -67,10 +67,10 @@ echo.
 
 REM Check YOLOv8 weights
 echo Checking YOLOv8 weights...
-if not exist yolov8n.pt (
+if not exist training\yolov8n.pt (
     echo YOLOv8n weights not found. They will be downloaded automatically on first run.
 ) else (
-    echo YOLOv8n weights found: yolov8n.pt
+    echo YOLOv8n weights found: training\yolov8n.pt
 )
 echo.
 

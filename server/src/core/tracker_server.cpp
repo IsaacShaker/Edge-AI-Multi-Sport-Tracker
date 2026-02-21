@@ -142,13 +142,13 @@ void TrackerServer::trackerLoop() {
                     running_ = false;
                 }
             } catch (cv::Exception& e) {
-                std::cerr << "\\n\\nERROR: Cannot display window!" << std::endl;
+                std::cerr << "\n\nERROR: Cannot display window!" << std::endl;
                 std::cerr << "Details: " << e.what() << std::endl;
-                std::cerr << "\\nDisabling visualization. Tracker will continue without display." << std::endl;
-                std::cerr << "\\nPossible solutions:" << std::endl;
-                std::cerr << "  1. Rebuild OpenCV with Qt support instead of GTK" << std::endl;
-                std::cerr << "  2. Run with X11 session instead of Wayland" << std::endl;
-                std::cerr << "  3. Use --no-viz flag to run without display\\n" << std::endl;
+                std::cerr << "\nDisabling visualization. Tracker will continue without display." << std::endl;
+                std::cerr << "\nPossible solutions:" << std::endl;
+                std::cerr << "  1. Set QT_QPA_PLATFORM=xcb (for XWayland compatibility)" << std::endl;
+                std::cerr << "  2. Verify Qt5 libraries are installed: qtbase5-dev qtwayland5" << std::endl;
+                std::cerr << "  3. Use --no-viz flag to run without display\n" << std::endl;
                 config_.enable_visualization = false;  // Disable to avoid repeated errors
             }
         } else {

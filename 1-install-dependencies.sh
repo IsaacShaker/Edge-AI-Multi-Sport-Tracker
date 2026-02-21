@@ -36,11 +36,34 @@ sudo apt install -y \
     git
 
 echo ""
-echo "Installing OpenCV and dependencies..."
+echo "Installing Qt5 libraries (required for OpenCV Qt backend)..."
 sudo apt install -y \
-    libopencv-dev \
-    libopencv-contrib-dev \
-    python3-opencv
+    qtbase5-dev \
+    qtchooser \
+    qt5-qmake \
+    qtbase5-dev-tools \
+    libqt5opengl5-dev \
+    qtwayland5
+
+echo ""
+echo "Installing other development dependencies..."
+sudo apt install -y \
+    libgtk-3-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libswscale-dev \
+    libv4l-dev \
+    libxvidcore-dev \
+    libx264-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libtiff-dev \
+    gfortran \
+    openexr \
+    libatlas-base-dev \
+    libtbb2 \
+    libtbb-dev \
+    libdc1394-dev
 
 echo ""
 echo "Installing Python dependencies..."
@@ -60,10 +83,10 @@ fi
 echo "Installing Python packages..."
 source .venv/bin/activate
 pip install --upgrade pip
-if [ -f "requirements.txt" ]; then
-    pip install -r requirements.txt
+if [ -f "python/requirements.txt" ]; then
+    pip install -r python/requirements.txt
 else
-    echo "Warning: requirements.txt not found, skipping Python package installation"
+    echo "Warning: python/requirements.txt not found, skipping Python package installation"
 fi
 
 echo ""
@@ -74,15 +97,15 @@ sudo apt install -y \
 echo ""
 echo "=== Dependency installation complete! ==="
 echo ""
-echo "Note: If you're using Wayland and encounter display issues:"
-echo "  Run: ./rebuild-opencv-qt.sh"
-echo "  This rebuilds OpenCV with Qt backend (fixes GTK/Wayland conflicts)"
+echo "Next steps:"
+echo "  1. Rebuild OpenCV with Qt backend (required for portability):"
+echo "     ./2-rebuild-opencv-qt.sh"
 echo ""
-echo "Optional: Install CUDA for GPU acceleration (if you have an NVIDIA GPU):"
-echo "  Follow instructions at: https://developer.nvidia.com/cuda-downloads"
+echo "  2. Build the C++ tracker server:"
+echo "     ./3-build.sh"
 echo ""
-echo "To build the project, run:"
-echo "  ./setup.sh"
+echo "  3. Run the tracker:"
+echo "     ./4-run.sh"
 echo ""
-echo "To run the tracker, use:"
-echo "  ./run-tracker.sh"
+echo "Optional: For Python legacy scripts, run:"
+echo "  cd python && ./setup.sh"

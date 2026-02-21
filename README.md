@@ -2,6 +2,28 @@
 
 A high-performance C++ server for real-time sports tracking using computer vision, state estimation, and gimbal control.
 
+## Quick Start
+
+**For new developers, follow this sequence:**
+
+```bash
+# 1. Install system dependencies (build tools, Qt5 libraries)
+./1-install-dependencies.sh
+
+# 2. Rebuild OpenCV with Qt backend (one-time setup for portability)
+./2-rebuild-opencv-qt.sh
+
+# 3. Build the C++ tracker server
+./3-build.sh
+
+# 4. Run the tracker
+./4-run.sh
+```
+
+The tracker will start with default settings (color-based detection, IMM estimator, mock motor). A window will display the camera feed with real-time tracking overlays.
+
+**Note**: This project uses Qt5 for cross-platform GUI support (works on both X11 and Wayland). We do not use GTK.
+
 ## Architecture
 
 The system is organized into well-defined subsystems with clean interfaces:
@@ -15,7 +37,7 @@ The system is organized into well-defined subsystems with clean interfaces:
 └─────────────────────────────────────────────┘
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed system design.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed system design.
 
 ## Features
 
@@ -43,8 +65,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed system design.
 ## Directory Structure
 
 ```
-├── ARCHITECTURE.md              # System architecture documentation
-├── README.md                     # This file
+├── docs/                        # Documentation
+│   ├── ARCHITECTURE.md          # System architecture
+│   ├── GETTING_STARTED.md       # Getting started guide
+│   ├── IMPLEMENTATION_STATUS.md # Implementation status
+│   ├── PROJECT_SUMMARY.md       # Project summary
+│   ├── QUICK_REFERENCE.md       # Quick reference
+│   └── TEST_GUIDE.md            # Testing guide
+├── README.md                    # This file
 ├── server/                       # C++ server
 │   ├── CMakeLists.txt           # Build configuration
 │   ├── include/                 # Header files
@@ -62,11 +90,18 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed system design.
 │       ├── factories/
 │       └── core/
 ├── python/                      # Python utilities
-│   └── training/                # Model training scripts
-├── embedded/                    # Embedded systems
-│   └── gimbal-control/          # Arduino/SimpleFOC code
-└── web/                         # Web interface
-    └── client/                  # Web streaming client
+│   ├── setup.sh                # Python setup script (Linux/Mac)
+│   ├── setup.bat               # Python setup script (Windows)
+│   ├── requirements.txt        # Python dependencies
+│   ├── legacy-control-scripts/ # Legacy control scripts
+│   ├── legacy-python-prototypes/ # Legacy prototypes
+│   └── training/               # Model training scripts
+│       ├── yolov8n.pt         # YOLOv8 nano weights
+│       └── train_yolo.py      # Training script
+├── embedded/                   # Embedded systems
+│   └── gimbal-control/         # Arduino/SimpleFOC code
+└── web/                        # Web interface
+    └── client/                 # Web streaming client
 ```
 
 ## Building
@@ -75,9 +110,21 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed system design.
 
 - CMake 3.16+
 - C++17 compatible compiler (GCC 7+, Clang 5+, MSVC 2017+)
-- OpenCV 4.x
+- OpenCV 4.x with Qt5 backend
+- Qt5 libraries (qtbase5-dev, qtwayland5)
 
-### Linux/Mac
+### Automated Build
+
+Use the numbered scripts in order:
+
+```bash
+./1-install-dependencies.sh  # Install system dependencies
+./2-rebuild-opencv-qt.sh     # Rebuild OpenCV with Qt backend
+./3-build.sh                 # Build tracker server
+./4-run.sh                   # Run tracker
+```
+
+### Manual Build (Linux/Mac)
 
 ```bash
 cd server
@@ -234,4 +281,4 @@ When adding new models:
 
 ---
 
-**Need Help?** See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed design documentation.
+**Need Help?** See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed design documentation.

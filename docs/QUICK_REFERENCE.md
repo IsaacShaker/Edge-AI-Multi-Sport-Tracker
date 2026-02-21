@@ -2,15 +2,26 @@
 
 ## Essential Commands
 
+### First-Time Setup
+```bash
+./1-install-dependencies.sh  # Install system dependencies
+./2-rebuild-opencv-qt.sh     # Rebuild OpenCV with Qt backend (one-time)
+./3-build.sh                 # Build the server
+./4-run.sh                   # Run with default settings
+```
+
 ### Building
 ```bash
-./build.sh                    # Build the server
+./3-build.sh                  # Build the server
 cd server/build && make       # Rebuild after changes
 ```
 
 ### Running
 ```bash
-# Default (color detection, IMM, mock motor)
+# Using convenience script (recommended)
+./4-run.sh
+
+# Direct execution with default settings
 ./server/build/bin/tracker_server
 
 # Custom configuration
@@ -253,7 +264,7 @@ ls /dev/video*      # Cameras
 ```bash
 # Clean rebuild
 rm -rf server/build
-./build.sh
+./3-build.sh
 ```
 
 ### Runtime Crashes
@@ -293,6 +304,7 @@ run --motor mock
 ---
 
 **Quick Links**:
-- Build: `./build.sh`
-- Run: `./server/build/bin/tracker_server`
+- Setup: `./1-install-dependencies.sh && ./2-rebuild-opencv-qt.sh`
+- Build: `./3-build.sh`
+- Run: `./4-run.sh`
 - Help: `./server/build/bin/tracker_server --help`

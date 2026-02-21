@@ -21,7 +21,10 @@ The Edge AI Multi-Sport Tracker repository has been reorganized from a collectio
 ├── ARCHITECTURE.md          # System design documentation
 ├── README.md                # Comprehensive guide
 ├── GETTING_STARTED.md       # Quick start tutorial
-├── build.sh                 # Build script
+├── 1-install-dependencies.sh # Install system dependencies
+├── 2-rebuild-opencv-qt.sh    # Rebuild OpenCV with Qt backend
+├── 3-build.sh                # Build C++ tracker server
+├── 4-run.sh                  # Run tracker with default settings
 │
 ├── server/                  # C++ Server (NEW)
 │   ├── CMakeLists.txt
@@ -98,7 +101,7 @@ Example:
 
 ### Build
 ```bash
-./build.sh
+./3-build.sh
 ```
 
 ### Run (Mock Mode - No Hardware)
@@ -211,7 +214,7 @@ These serve as:
 
 ### 1. Build Verification
 ```bash
-./build.sh
+./3-build.sh
 # Should complete without errors
 ```
 
@@ -249,7 +252,7 @@ cd server/build
 
 5. Rebuild and test:
    ```bash
-   ./build.sh
+   ./3-build.sh
    ./bin/tracker_server --vision my_detector
    ```
 
