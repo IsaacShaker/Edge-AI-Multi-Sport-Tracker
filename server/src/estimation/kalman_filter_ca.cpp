@@ -8,7 +8,6 @@ bool KalmanFilterCA::initialize(const Config& config) {
     config_ = static_cast<const EstimatorConfig&>(config);
     initialized_ = false;
     
-#ifdef ENABLE_OPENCV
     // Initialize 8-state Kalman filter: [x, y, vx, vy, ax, ay, r, dr]
     kf_ = cv::KalmanFilter(8, 3, 0, CV_32F);
     
@@ -57,13 +56,9 @@ bool KalmanFilterCA::initialize(const Config& config) {
     gravity_px_ = config_.gravity_m_s2 * config_.px_per_meter / (config_.fps * config_.fps);
     
     return true;
-#else
-    return false;
-#endif
 }
 
 void KalmanFilterCA::initializeState(const Detection& detection) {
-#ifdef ENABLE_OPENCV
     kf_.statePost.at<float>(0) = detection.center.x;
     kf_.statePost.at<float>(1) = detection.center.y;
     kf_.statePost.at<float>(2) = 0;  // vx
@@ -75,11 +70,9 @@ void KalmanFilterCA::initializeState(const Detection& detection) {
     
     initialized_ = true;
     current_state_ = kalmanToEstimatedState();
-#endif
 }
 
 EstimatedState KalmanFilterCA::predict(float dt) {
-#ifdef ENABLE_OPENCV
     if (!initialized_) {
         return EstimatedState();
     }
@@ -87,13 +80,9 @@ EstimatedState KalmanFilterCA::predict(float dt) {
     kf_.predict();
     current_state_ = kalmanToEstimatedState();
     return current_state_;
-#else
-    return EstimatedState();
-#endif
 }
 
 EstimatedState KalmanFilterCA::update(const Detection& detection) {
-#ifdef ENABLE_OPENCV
     if (!initialized_) {
         initializeState(detection);
         return current_state_;
@@ -108,9 +97,6 @@ EstimatedState KalmanFilterCA::update(const Detection& detection) {
     kf_.correct(measurement);
     current_state_ = kalmanToEstimatedState();
     return current_state_;
-#else
-    return EstimatedState();
-#endif
 }
 
 EstimatedState KalmanFilterCA::getState() const {
@@ -122,7 +108,6 @@ void KalmanFilterCA::reset() {
     current_state_ = EstimatedState();
 }
 
-#ifdef ENABLE_OPENCV
 EstimatedState KalmanFilterCA::kalmanToEstimatedState() const {
     EstimatedState state;
     state.position.x = kf_.statePost.at<float>(0);
@@ -155,6 +140,5 @@ float KalmanFilterCA::estimateDistance(float filtered_radius) const {
     
     return K / d_image;  // Distance in mm
 }
-#endif
 
 } // namespace tracker

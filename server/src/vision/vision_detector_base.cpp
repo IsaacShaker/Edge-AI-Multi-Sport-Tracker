@@ -1,7 +1,6 @@
 // Stub implementation - to be completed
 #include "../include/vision/vision_detector_base.h"
 
-#ifdef ENABLE_OPENCV
 namespace tracker {
 
 cv::Mat VisionDetectorBase::frameToMat(const void* frame_data, int width, int height) const {
@@ -10,4 +9,3 @@ cv::Mat VisionDetectorBase::frameToMat(const void* frame_data, int width, int he
 }
 
 } // namespace tracker
-#endif

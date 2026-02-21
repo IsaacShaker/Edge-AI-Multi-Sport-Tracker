@@ -6,14 +6,10 @@ namespace tracker {
 bool ColorBasedDetector::initialize(const Config& config) {
     config_ = static_cast<const VisionConfig&>(config);
     
-#ifdef ENABLE_OPENCV
     lower_bound_ = cv::Scalar(config_.hue_min, config_.sat_min, config_.val_min);
     upper_bound_ = cv::Scalar(config_.hue_max, config_.sat_max, config_.val_max);
     ready_ = true;
     return true;
-#else
-    return false;
-#endif
 }
 
 std::vector<Detection> ColorBasedDetector::detect(
@@ -23,7 +19,6 @@ std::vector<Detection> ColorBasedDetector::detect(
 ) {
     std::vector<Detection> detections;
     
-#ifdef ENABLE_OPENCV
     if (!ready_) return detections;
     
     cv::Mat frame = frameToMat(frame_data, width, height);
@@ -41,7 +36,6 @@ std::vector<Detection> ColorBasedDetector::detect(
     if (findBallContour(mask, detection)) {
         detections.push_back(detection);
     }
-#endif
     
     return detections;
 }
@@ -50,7 +44,6 @@ void ColorBasedDetector::shutdown() {
     ready_ = false;
 }
 
-#ifdef ENABLE_OPENCV
 bool ColorBasedDetector::findBallContour(const cv::Mat& mask, Detection& detection) {
     std::vector<std::vector<cv::Point>> contours;
     cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
@@ -93,6 +86,5 @@ bool ColorBasedDetector::findBallContour(const cv::Mat& mask, Detection& detecti
     
     return true;
 }
-#endif
 
 } // namespace tracker

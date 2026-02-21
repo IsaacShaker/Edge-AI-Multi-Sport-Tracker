@@ -3,10 +3,7 @@
 #include "../include/factories/estimator_factory.h"
 #include "../include/factories/motor_factory.h"
 #include <iostream>
-
-#ifdef ENABLE_OPENCV
 #include <opencv2/opencv.hpp>
-#endif
 
 namespace tracker {
 
@@ -101,7 +98,6 @@ TrackerServer::Stats TrackerServer::getStats() const {
 }
 
 void TrackerServer::trackerLoop() {
-#ifdef ENABLE_OPENCV
     // Open camera
     cv::VideoCapture cap(config_.camera_device_id);
     if (!cap.isOpened()) {
@@ -171,10 +167,6 @@ void TrackerServer::trackerLoop() {
     if (config_.enable_visualization) {
         cv::destroyAllWindows();
     }
-#else
-    std::cerr << "OpenCV not enabled, cannot run tracker loop" << std::endl;
-    running_ = false;
-#endif
 }
 
 void TrackerServer::processFrame(const void* frame_data, int width, int height) {
@@ -237,7 +229,6 @@ GimbalAngles TrackerServer::computeGimbalAngles(const EstimatedState& state) {
     return GimbalAngles(pan_angle, tilt_angle);
 }
 
-#ifdef ENABLE_OPENCV
 void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
     // Detect objects
     auto detections = vision_->detect(frame.data, frame.cols, frame.rows);
@@ -350,6 +341,5 @@ void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
     cv::putText(frame, "Green: Detection | Blue: Predicted", cv::Point(10, frame.rows - 10),
                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
 }
-#endif
 
 } // namespace tracker

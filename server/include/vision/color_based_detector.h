@@ -2,10 +2,7 @@
 
 #include "vision_detector_base.h"
 #include "../factories/vision_factory.h"
-
-#ifdef ENABLE_OPENCV
 #include <opencv2/opencv.hpp>
-#endif
 
 namespace tracker {
 
@@ -35,7 +32,6 @@ public:
 private:
     VisionConfig config_;
     
-#ifdef ENABLE_OPENCV
     cv::Scalar lower_bound_;
     cv::Scalar upper_bound_;
     
@@ -43,7 +39,6 @@ private:
      * @brief Find the largest circular contour in a binary mask
      */
     bool findBallContour(const cv::Mat& mask, Detection& detection);
-#endif
 };
 
 } // namespace tracker

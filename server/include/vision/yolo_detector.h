@@ -2,11 +2,8 @@
 
 #include "vision_detector_base.h"
 #include "../factories/vision_factory.h"
-
-#ifdef ENABLE_OPENCV
 #include <opencv2/opencv.hpp>
 #include <opencv2/dnn.hpp>
-#endif
 
 namespace tracker {
 
@@ -36,7 +33,6 @@ public:
 private:
     VisionConfig config_;
     
-#ifdef ENABLE_OPENCV
     cv::dnn::Net net_;
     std::vector<std::string> class_names_;
     
@@ -48,7 +44,6 @@ private:
         int frame_width,
         int frame_height
     );
-#endif
 };
 
 } // namespace tracker

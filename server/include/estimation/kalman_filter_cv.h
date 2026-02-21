@@ -2,10 +2,7 @@
 
 #include "../interfaces/i_state_estimator.h"
 #include "../factories/estimator_factory.h"
-
-#ifdef ENABLE_OPENCV
 #include <opencv2/opencv.hpp>
-#endif
 
 namespace tracker {
 
@@ -36,7 +33,6 @@ private:
     bool initialized_;
     EstimatedState current_state_;
     
-#ifdef ENABLE_OPENCV
     cv::KalmanFilter kf_;
     
     /**
@@ -48,7 +44,6 @@ private:
      * @brief Estimate distance from filtered radius
      */
     float estimateDistance(float filtered_radius) const;
-#endif
 };
 
 } // namespace tracker

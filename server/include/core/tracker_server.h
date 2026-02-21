@@ -11,10 +11,7 @@
 #include <atomic>
 #include <mutex>
 #include <chrono>
-
-#ifdef ENABLE_OPENCV
 #include <opencv2/opencv.hpp>
-#endif
 
 namespace tracker {
 
@@ -115,12 +112,10 @@ private:
      */
     void processFrame(const void* frame_data, int width, int height);
     
-#ifdef ENABLE_OPENCV
     /**
      * @brief Process a single frame with visualization
      */
     void processFrameWithVisualization(cv::Mat& frame);
-#endif
     
     /**
      * @brief Compute gimbal angles from estimated state

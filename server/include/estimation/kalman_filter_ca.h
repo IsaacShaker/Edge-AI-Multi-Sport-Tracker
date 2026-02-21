@@ -2,10 +2,7 @@
 
 #include "../interfaces/i_state_estimator.h"
 #include "../factories/estimator_factory.h"
-
-#ifdef ENABLE_OPENCV
 #include <opencv2/opencv.hpp>
-#endif
 
 namespace tracker {
 
@@ -37,12 +34,10 @@ private:
     EstimatedState current_state_;
     float gravity_px_;  // Gravity in pixels/frame^2
     
-#ifdef ENABLE_OPENCV
     cv::KalmanFilter kf_;
     
     EstimatedState kalmanToEstimatedState() const;
     float estimateDistance(float filtered_radius) const;
-#endif
 };
 
 } // namespace tracker

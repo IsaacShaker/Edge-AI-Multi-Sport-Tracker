@@ -14,15 +14,10 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # Options
 option(BUILD_TESTS "Build unit tests" ON)
 option(BUILD_EXAMPLES "Build example applications" ON)
-option(ENABLE_OPENCV "Enable OpenCV support" ON)
 
 # Find packages
 find_package(Threads REQUIRED)
-
-if(ENABLE_OPENCV)
-    find_package(OpenCV REQUIRED)
-    add_compile_definitions(ENABLE_OPENCV)
-endif()
+find_package(OpenCV REQUIRED)
 
 # Include directories
 include_directories(

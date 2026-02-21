@@ -2,10 +2,7 @@
 
 #include "../interfaces/i_vision_detector.h"
 #include "../interfaces/types.h"
-
-#ifdef ENABLE_OPENCV
 #include <opencv2/opencv.hpp>
-#endif
 
 namespace tracker {
 
@@ -22,12 +19,10 @@ public:
 protected:
     bool ready_;
     
-#ifdef ENABLE_OPENCV
     /**
      * @brief Helper to convert void* frame data to cv::Mat
      */
     cv::Mat frameToMat(const void* frame_data, int width, int height) const;
-#endif
 };
 
 } // namespace tracker

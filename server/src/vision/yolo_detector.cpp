@@ -7,16 +7,12 @@ namespace tracker {
 bool YOLODetector::initialize(const Config& config) {
     config_ = static_cast<const VisionConfig&>(config);
     
-#ifdef ENABLE_OPENCV
     // TODO: Load YOLO model
     // For now, just mark as not ready until model loading is implemented
     std::cout << "[YOLODetector] Model loading not yet implemented" << std::endl;
     std::cout << "[YOLODetector] Would load: " << config_.model_path << std::endl;
     ready_ = false;
     return false;
-#else
-    return false;
-#endif
 }
 
 std::vector<Detection> YOLODetector::detect(
@@ -32,7 +28,6 @@ void YOLODetector::shutdown() {
     ready_ = false;
 }
 
-#ifdef ENABLE_OPENCV
 std::vector<Detection> YOLODetector::postprocess(
     const std::vector<cv::Mat>& outputs,
     int frame_width,
@@ -41,6 +36,5 @@ std::vector<Detection> YOLODetector::postprocess(
     // TODO: Implement YOLO post-processing
     return std::vector<Detection>();
 }
-#endif
 
 } // namespace tracker
