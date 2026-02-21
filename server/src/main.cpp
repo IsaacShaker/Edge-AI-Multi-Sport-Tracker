@@ -1,7 +1,7 @@
-#include "include/core/tracker_server.h"
-#include "include/factories/vision_factory.h"
-#include "include/factories/estimator_factory.h"
-#include "include/factories/motor_factory.h"
+#include "core/tracker_server.h"
+#include "factories/vision_factory.h"
+#include "factories/estimator_factory.h"
+#include "factories/motor_factory.h"
 #include <iostream>
 #include <csignal>
 #include <memory>

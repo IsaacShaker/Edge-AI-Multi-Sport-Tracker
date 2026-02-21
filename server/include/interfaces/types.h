@@ -83,8 +83,9 @@ struct Detection {
     float confidence;
     std::string label;
     int64_t timestamp_ms;
+    bool has_bbox;       // Whether bounding box is valid
     
-    Detection() : radius(0.0f), confidence(0.0f), timestamp_ms(0) {}
+    Detection() : radius(0.0f), confidence(0.0f), timestamp_ms(0), has_bbox(false) {}
 };
 
 /**

@@ -3,10 +3,18 @@
 #include "../interfaces/i_vision_detector.h"
 #include "../interfaces/i_state_estimator.h"
 #include "../interfaces/i_motor_controller.h"
+#include "../factories/vision_factory.h"
+#include "../factories/estimator_factory.h"
+#include "../factories/motor_factory.h"
 #include <memory>
 #include <thread>
 #include <atomic>
+#include <mutex>
 #include <chrono>
+
+#ifdef ENABLE_OPENCV
+#include <opencv2/opencv.hpp>
+#endif
 
 namespace tracker {
 
@@ -106,6 +114,13 @@ private:
      * @brief Process a single frame
      */
     void processFrame(const void* frame_data, int width, int height);
+    
+#ifdef ENABLE_OPENCV
+    /**
+     * @brief Process a single frame with visualization
+     */
+    void processFrameWithVisualization(cv::Mat& frame);
+#endif
     
     /**
      * @brief Compute gimbal angles from estimated state

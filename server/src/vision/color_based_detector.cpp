@@ -85,10 +85,11 @@ bool ColorBasedDetector::findBallContour(const cv::Mat& mask, Detection& detecti
     detection.radius = radius;
     detection.confidence = std::min(max_area / 10000.0, 1.0);  // Heuristic
     detection.label = config_.target_label;
-    detection.bbox.x = center.x;
-    detection.bbox.y = center.y;
+    detection.bbox.x = center.x - radius;  // Top-left corner
+    detection.bbox.y = center.y - radius;
     detection.bbox.width = 2.0f * radius;
     detection.bbox.height = 2.0f * radius;
+    detection.has_bbox = true;
     
     return true;
 }

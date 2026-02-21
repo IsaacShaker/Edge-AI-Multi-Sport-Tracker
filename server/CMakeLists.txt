@@ -102,12 +102,14 @@ target_link_libraries(tracker_server
 # Tests
 if(BUILD_TESTS)
     enable_testing()
-    add_subdirectory(test)
+    # TODO: Create test directory
+    # add_subdirectory(test)
 endif()
 
 # Examples
 if(BUILD_EXAMPLES)
-    add_subdirectory(examples)
+    # TODO: Create examples directory
+    # add_subdirectory(examples)
 endif()
 
 # Installation

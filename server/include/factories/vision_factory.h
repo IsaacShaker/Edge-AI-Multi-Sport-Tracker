@@ -28,9 +28,9 @@ struct VisionConfig : public Config {
           input_width(640),
           input_height(480),
           target_label("sports ball"),
-          hue_min(0), hue_max(30),
-          sat_min(100), sat_max(255),
-          val_min(100), val_max(255) {}
+          hue_min(25), hue_max(45),      // Yellow-green for tennis balls
+          sat_min(80), sat_max(255),
+          val_min(80), val_max(255) {}
 };
 
 /**

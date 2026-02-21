@@ -4,17 +4,17 @@
 The Edge AI Multi-Sport Tracker consists of four main subsystems orchestrated by a C++ server:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     C++ Server Core                         │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │   Vision    │  │  Estimation  │  │    Motor     │      │
-│  │   System    │→ │    System    │→ │  Controller  │      │
-│  └─────────────┘  └──────────────┘  └──────────────┘      │
-│         ↓                                                   │
-│  ┌─────────────────────────────────────────────────┐      │
-│  │           Web Streaming Service                 │      │
-│  └─────────────────────────────────────────────────┘      │
-└─────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────┐
+│                     C++ Server Core                   │
+│  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │   Vision    │  │  Estimation  │  │    Motor     │  │
+│  │   System    │→ │    System    │→ │  Controller  │  │
+│  └─────────────┘  └──────────────┘  └──────────────┘  │
+│         ↓                                             │      
+│  ┌─────────────────────────────────────────────────┐  │
+│  │           Web Streaming Service                 │  │
+│  └─────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────┘
 ```
 
 ## Subsystems
@@ -80,7 +80,7 @@ auto motor = MotorControllerFactory::create("simplefoc", config);
 ```
 server/
 ├── include/
-│   ├── interfaces/         # Abstract interfaces
+│   ├── interfaces/        # Abstract interfaces
 │   ├── vision/            # Vision system
 │   ├── estimation/        # State estimation
 │   ├── motor/             # Motor control
