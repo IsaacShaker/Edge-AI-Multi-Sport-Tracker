@@ -1,4 +1,3 @@
-@ -0,0 +1,270 @@
 # Form implementation generated from reading ui file 'UI/driveBoardDebug.ui'
 #
 # Created by: PyQt6 UI code generator 6.9.1
