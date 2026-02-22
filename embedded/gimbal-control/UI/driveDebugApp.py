@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import sys
@@ -56,16 +57,25 @@ class DriveDebugApp(QtWidgets.QWidget):
         self.ui.refreshCOM.clicked.connect(self.refresh_ports)
         self.ui.selectCOM.clicked.connect(self.connect_selected_port)
         self.ui.homeMotors.clicked.connect(self.home_motors)
-        self.ui.getPosition.clicked.connect(self.get_position)
+        self.ui.getSettings.clicked.connect(self.get_settings)
 
         self.ui.pAngleSet.clicked.connect(self.send_pitch_target)
         self.ui.yAngleSet.clicked.connect(self.send_yaw_target)
+        self.ui.bothAngleSet.clicked.connect(self.send_both_target)
 
         self.ui.pSetPID.clicked.connect(lambda: self.send_pid(axis="pitch"))
         self.ui.ySetPID.clicked.connect(lambda: self.send_pid(axis="yaw"))
 
         self.ui.pSetVelocity.clicked.connect(lambda: self.send_velocity(axis="pitch"))
         self.ui.ySetVelocity.clicked.connect(lambda: self.send_velocity(axis="yaw"))
+        self.ui.pSetLPF.clicked.connect(lambda: self.send_LPF(axis="pitch"))
+        self.ui.ySetLPF.clicked.connect(lambda: self.send_LPF(axis="yaw"))
+
+        self.ui.saveSettings.clicked.connect(lambda: self.save_settings(settingType="all"))
+        self.ui.setHome.clicked.connect(lambda: self.save_settings(settingType="home"))
+
+        self.ui.testScanMode.clicked.connect(self.full_scan_mode)
+        self.ui.testYawScan.clicked.connect(self.yaw_scan_mode)
 
         # Poll serial for incoming text
         self._poll_timer = QtCore.QTimer(self)
@@ -221,9 +231,13 @@ class DriveDebugApp(QtWidgets.QWidget):
         angle = float((self.ui.yAngle.value()))
         self.write_line(f"B{angle:.3f} {checked:.3f}")
 
+    def send_both_target(self) -> None:
+        self.send_pitch_target()
+        self.send_yaw_target()
+
     def home_motors(self) -> None:
-        self.write_line("M0 0")
-        # Home both to zero using the combined command
+        self.write_line("H")
+        # Home both to saved home.
 
     def send_pid(self, axis: str) -> None:
         #Send a PID command to either bottom or top motor using serial.
@@ -249,8 +263,113 @@ class DriveDebugApp(QtWidgets.QWidget):
             velocity = float(self.ui.yVelocity.value())
             self.write_line(f"V{motor:.3f} {velocity:.3f}")
     
-    def get_position(self) -> None:
+    def send_LPF(self, axis: str) -> None:
+        #Send a PID command to either bottom or top motor using serial.
+        if axis == "pitch":
+            motor = 1
+            lowPass = float(self.ui.pLPF.value())
+            self.write_line(f"L{motor:.3f} {lowPass:.3f}")
+        else:
+            motor = 0
+            lowPass = float(self.ui.yLPF.value())
+            self.write_line(f"L{motor:.3f} {lowPass:.3f}")
+    
+    def get_settings(self) -> None:
         self.write_line(f"X")
+
+    def save_settings(self, settingType: str) -> None:
+        if settingType == "home":
+            self.write_line(f"S{0:.1f} {0:.1f} {1:.1f}")
+        if settingType == "all":
+            self.write_line(f"S{1:.1f} {1:.1f} {0:.1f}")
+
+
+    #Fun programs for demonstration purposes.
+    def full_scan_mode(self):
+        #total sweep time and frequency of commands.
+        sweep_time = 5.0
+        dt = 0.02 #50hz
+
+        #Start and end position in rad
+        pitch_start = 0.2
+        pitch_end = 1.3
+        yaw_start = 1.5
+        yaw_end = 3.3
+
+        #Sweep motion
+        yaw_diff = yaw_start - yaw_end
+        pitch_diff = pitch_start - pitch_end
+
+        #amount of steps needed for frequency and range.
+        steps = int(sweep_time / dt)
+        yaw_diff   = yaw_end   - yaw_start
+        pitch_diff = pitch_end - pitch_start
+        yaw_increment   = yaw_diff / (steps - 1)
+        pitch_increment = pitch_diff / (steps - 1)
+
+        yaw = yaw_start
+        pitch = pitch_start
+
+        #forward sweep
+        for i in range(steps):
+            self.write_line(f"B{yaw:.3f} 0")
+            self.write_line(f"T{pitch:.3f} 0")
+            yaw   += yaw_increment
+            pitch += pitch_increment
+            time.sleep(dt)
+        
+        #camera readjust
+        for i in range(steps):
+            t = i / (steps - 1)
+
+            pitch = pitch_end - t * (pitch_end - pitch_start)
+
+            # Hold yaw at final value
+            self.write_line(f"B{yaw_end:.3f} 0")
+            self.write_line(f"T{pitch:.3f} 0")
+
+            time.sleep(dt)
+        
+        #reverse sweep
+        for i in range(steps):
+            self.write_line(f"B{yaw:.3f} 0")
+            self.write_line(f"T{pitch:.3f} 0")
+            yaw   -= yaw_increment
+            pitch += pitch_increment
+            time.sleep(dt)
+    
+    def yaw_scan_mode(self):
+        #total sweep time and frequency of commands.
+        sweep_time = 5.0
+        dt = 0.02 #50hz
+
+        #Start and end position in rad
+        yaw_start = 1.5
+        yaw_end = 3.3
+
+        #Sweep motion
+        yaw_diff = yaw_start - yaw_end
+
+        #amount of steps needed for frequency and range.
+        steps = int(sweep_time / dt)
+        yaw_diff   = yaw_end   - yaw_start
+        yaw_increment   = yaw_diff / (steps - 1)
+        yaw = yaw_start
+
+        #forward sweep
+        for i in range(steps):
+            self.write_line(f"B{yaw:.3f} 0")
+            yaw   += yaw_increment
+            time.sleep(dt)
+        
+        
+        #reverse sweep
+        for i in range(steps):
+            self.write_line(f"B{yaw:.3f} 0")
+            yaw   -= yaw_increment
+            time.sleep(dt)
+
+
         
     #
     # Cleanup

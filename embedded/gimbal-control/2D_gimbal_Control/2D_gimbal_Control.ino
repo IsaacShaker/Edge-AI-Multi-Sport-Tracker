@@ -1,40 +1,45 @@
 #include <SimpleFOC.h>
+#include <EEPROM.h>
+#include "gimbal_settings.h"
 
-// =====================================================
-// SENSOR CONFIGURATION
-// =====================================================
-// Each AS5600 on its own I2C bus (same address 0x36, separate buses)
-// Bottom motor sensor on Wire (SDA0/SCL0)
-// Top motor sensor on Wire1 (SDA1/SCL1)
+//---------------------------------------
+//    SENSOR CONFIGURATION
+//---------------------------------------
 
 MagneticSensorI2C sensorBottom = MagneticSensorI2C(AS5600_I2C);
 MagneticSensorI2C sensorTop = MagneticSensorI2C(AS5600_I2C);
 
-// =====================================================
-// MOTOR & DRIVER CONFIGURATION
-// =====================================================
+//---------------------------------------
+//    MOTOR & DRIVER CONFIGURATION
+//---------------------------------------
 
 // --- Bottom Motor (Pan/Yaw) ---
-// pole pairs=7, phase resistance=2.3Ω, KV=220, inductance=0.00086H
 BLDCMotor motorBottom = BLDCMotor(7, 2.3, 220, 0.00086);
 BLDCDriver3PWM driverBottom = BLDCDriver3PWM(1, 2, 3, 0);  // PWM pins + enable
 
 // --- Top Motor (Tilt/Pitch) ---
-// ADJUST these values to match your top motor specs!
-// Using same motor type as bottom as placeholder
 BLDCMotor motorTop = BLDCMotor(7, 2.3, 220, 0.00086);
 BLDCDriver3PWM driverTop = BLDCDriver3PWM(6,7,8,5);  // PWM pins + enable
-// ^^^ CHANGE THESE PINS to match your wiring!
 
-// =====================================================
-// CONTROL VARIABLES
-// =====================================================
+//---------------------------------------
+//    CONTROL VARIABLES
+//---------------------------------------
+
 float target_angle_bottom = 0;  // pan/yaw target (radians)
 float target_angle_top = 0;     // tilt/pitch target (radians)
 
-// =====================================================
-// COMMANDER (Serial Interface)
-// =====================================================
+float home_angle_bottom = 0;  // pan/yaw target (radians)
+float home_angle_top = 0;     // tilt/pitch target (radians)
+
+
+//---------------------------------------
+//    MEMORY SETTINGS
+//---------------------------------------
+Settings settings;  //Instatiate the gimbal settings.
+
+//---------------------------------------
+//    COMMANDER (Serial Interface)
+//---------------------------------------
 Commander command = Commander(Serial);
 
 void doTargetBottom(char* cmd) {
@@ -75,6 +80,7 @@ void doTargetTop(char* cmd) {
   }
 }
 
+
 // Move both motors at once: expects "pan_angle tilt_angle"
 void doTargetBoth(char* cmd) {
   // Parse two floats from the command string
@@ -87,6 +93,11 @@ void doTargetBoth(char* cmd) {
   } else {
     Serial.println("Usage: M<pan> <tilt>  (e.g., M1.57 0.5)");
   }
+}
+
+void homeMotors(char* cmd) {
+  target_angle_top = settings.top_home;
+  target_angle_bottom = settings.bottom_home;
 }
 
 void bSetPID(char* cmd) {
@@ -107,6 +118,7 @@ void bSetPID(char* cmd) {
     Serial.println("Usage: Bconfig <P> <I> <D>");
   }
 }
+
 
 void tSetPID(char* cmd) {
   //parse three floats from cmd, map to P, I, D.
@@ -150,17 +162,130 @@ void setVelocity(char* cmd) {
   }
 }
 
-void getPos(char* cmd) {
+//Set LPF of either motors in single command.
+void setLPF(char* cmd) {
+  //Get the position in radians of the bottom and top motor encoders.
+  float seconds, motor;
+
+  //Motor = Input1, Seconds = Input2
+  if (sscanf(cmd, "%f %f", &motor, &seconds) == 2) {
+    if(motor == 1){
+      motorTop.LPF_velocity.Tf = seconds;
+      Serial.print("Top Motor ");
+    }
+    else{
+      motorBottom.LPF_velocity.Tf = seconds;
+      Serial.print("Bottom Motor ");
+    }
+    Serial.print("Seconds (s): "); Serial.println(seconds, 3);
+  }
+
+  else{
+    Serial.println("Usage: L <motor (0 for bottom, 1 for top)> <seconds (s)>");
+  }
+}
+
+
+void getInfo(char* cmd) {
+  Serial.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
   //Get the position in radians of the bottom and top motor encoders.
   float bottomPos = motorBottom.shaftAngle();
   float topPos = motorTop.shaftAngle();
   Serial.print("Top Position (Rads): "); Serial.print(topPos, 3);
-  Serial.print(" | Bottom Position (Rads): "); Serial.print(bottomPos, 3);
+  Serial.print(" | Bottom Position (Rads): "); Serial.println(bottomPos, 3);
+
+  //Return the saved home position.
+  Serial.print("Top Home Pos (Rads): "); Serial.print(home_angle_top, 3);
+  Serial.print(" | Bottom Home Pos (Rads): "); Serial.println(home_angle_bottom, 3);
+
+
+  //Return the current PID values.
+  float tP, tI, tD;
+  tP = motorTop.PID_velocity.P;
+  tI = motorTop.PID_velocity.I;
+  tD = motorTop.PID_velocity.D;
+  Serial.print("top P: "); Serial.print(tP, 3);
+  Serial.print(" | top I: "); Serial.print(tI, 3);
+  Serial.print(" | top D: "); Serial.println(tD, 3);
+
+  float bP, bI, bD;
+  bP = motorBottom.PID_velocity.P;
+  bI = motorBottom.PID_velocity.I;
+  bD = motorBottom.PID_velocity.D;
+  Serial.print("bottom P: "); Serial.print(bP, 3);
+  Serial.print(" | bottom I: "); Serial.print(bI, 3);
+  Serial.print(" | bottom D: "); Serial.println(bD, 3);
+
+  //return the current velocity limits.
+  float bV, tV, tLPF, bLPF;
+  tV = motorTop.velocity_limit;
+  bV = motorBottom.velocity_limit;
+  Serial.print("bottom vlimit: "); Serial.print(bV, 3);
+  Serial.print(" | top vlimit: "); Serial.println(tV, 3);
+  tLPF = motorTop.LPF_velocity.Tf;
+  bLPF = motorBottom.LPF_velocity.Tf;
+  Serial.print("bottom LPF: "); Serial.print(bLPF, 3);
+  Serial.print(" | top LPF: "); Serial.println(tLPF, 3);
+
+
+  Serial.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+
 }
 
-// =====================================================
-// SETUP
-// =====================================================
+void saveSettings(char* cmd){
+  float pidSet, vSet, homeSet;
+
+  //input 1 = PID, 2 = velocity, 3 = home
+  if (sscanf(cmd, "%f %f %f", &pidSet, &vSet, &homeSet) == 3) {
+    bool savedPID = false;
+    bool savedV = false;
+    bool savedHome = false;
+
+    if(pidSet == 1){
+      settings.bottom_p = motorBottom.PID_velocity.P;
+      settings.bottom_i = motorBottom.PID_velocity.I;
+      settings.bottom_d = motorBottom.PID_velocity.D;
+      settings.top_p = motorTop.PID_velocity.P;
+      settings.top_i = motorTop.PID_velocity.I;
+      settings.top_d = motorTop.PID_velocity.D;
+
+      savedPID = true;
+    }
+    if(vSet == 1){
+      settings.top_vlimit = motorTop.velocity_limit;
+      settings.bottom_vlimit = motorBottom.velocity_limit;
+      settings.top_lpf = motorTop.LPF_velocity.Tf;
+      settings.bottom_lpf = motorBottom.LPF_velocity.Tf;
+      savedV = true;
+
+    }
+    if(homeSet == 1){
+      settings.bottom_home = motorBottom.shaftAngle();
+      settings.top_home = motorTop.shaftAngle();
+      savedHome = true;
+    }
+    settings_save(settings);
+
+    // ---- Return Message ----
+    Serial.print("SAVE OK | ");
+
+    if (savedPID)  Serial.print("PID ");
+    if (savedV)  Serial.print("VEL ");
+    if (savedHome) Serial.print("HOME ");
+
+    Serial.println();
+  }
+  else {
+    Serial.println("SAVE ERROR | Usage: S<pid> <vel> <home>  (ex: S1 0 1)");
+  }
+}
+
+
+
+//---------------------------------------
+//    SETUP
+//---------------------------------------
+
 void setup() {
   Serial.begin(115200);
   SimpleFOCDebug::enable(&Serial);
@@ -174,6 +299,37 @@ void setup() {
 
   Serial.println(F("Init top sensor (Wire1 / SDA1)..."));
   sensorTop.init(&Wire1);     // I2C bus 1 (SDA1/SCL1)
+
+
+  // -------------------------------------------------
+  // Motor Setup (Pan/Yaw)
+  // -------------------------------------------------
+
+  //Check if valid settings save in memory. If not, load defaults.
+  if(!settings_load(settings)){
+    Serial.println("No valid settings... Loading defaults.");
+
+     // Default PID values
+    settings.bottom_p = 0.01;
+    settings.bottom_i = 0.0;
+    settings.bottom_d = 0.0;
+
+    settings.top_p = 0.01;
+    settings.top_i = 0.0;
+    settings.top_d = 0.0;
+
+    settings.bottom_home = 0.0;
+    settings.top_home = 0.0;
+
+    settings.top_vlimit = 7.0;
+    settings.bottom_vlimit = 7.0;
+
+    settings.top_lpf = 0.01;
+    settings.bottom_lpf = 0.01;
+
+    settings_save(settings);
+  }
+
 
   // -------------------------------------------------
   // Bottom Motor Setup (Pan/Yaw)
@@ -189,17 +345,17 @@ void setup() {
   motorBottom.controller = MotionControlType::angle;
 
   // Velocity PID
-  motorBottom.PID_velocity.P = 0.5f;
-  motorBottom.PID_velocity.I = 0;
-  motorBottom.PID_velocity.D = 0;
+  motorBottom.PID_velocity.P = settings.bottom_p;
+  motorBottom.PID_velocity.I = settings.bottom_i;
+  motorBottom.PID_velocity.D = settings.bottom_d;
   motorBottom.PID_velocity.output_ramp = 100;
 
   motorBottom.voltage_limit = 2.3;
-  motorBottom.LPF_velocity.Tf = 0.01f;
+  motorBottom.LPF_velocity.Tf = settings.bottom_lpf;
 
   // Angle P controller
   motorBottom.P_angle.P = 10;
-  motorBottom.velocity_limit = 25;
+  motorBottom.velocity_limit = settings.bottom_vlimit;
 
   motorBottom.useMonitoring(Serial);
   motorBottom.init();
@@ -219,25 +375,29 @@ void setup() {
   motorTop.controller = MotionControlType::angle;
 
   // Velocity PID - may need different tuning for tilt axis
-  // (tilt axis often has different load/inertia than pan)
-  motorTop.PID_velocity.P = 0.05f;
-  motorTop.PID_velocity.I = 0;
-  motorTop.PID_velocity.D = 0;
+  motorTop.PID_velocity.P = settings.top_p;
+  motorTop.PID_velocity.I = settings.top_i;
+  motorTop.PID_velocity.D = settings.top_d;
   motorTop.PID_velocity.output_ramp = 100;
 
   motorTop.voltage_limit = 2.3;
-  motorTop.LPF_velocity.Tf = 0.01f;
+  motorTop.LPF_velocity.Tf = settings.top_lpf;
 
   // Angle P controller
   motorTop.P_angle.P = 10;
-  motorTop.velocity_limit = 25;
-
-  // Optional: limit tilt range to prevent gimbal hitting frame
-  // motorTop.P_angle.limit = 1.57;  // ~90 degrees max travel
+  motorTop.velocity_limit = settings.top_vlimit;
 
   motorTop.useMonitoring(Serial);
   motorTop.init();
   motorTop.initFOC();
+
+  // -------------------------------------------------
+  // Motor Inital State Setup
+  // -------------------------------------------------
+  target_angle_bottom = motorBottom.shaftAngle();
+  target_angle_top = motorTop.shaftAngle();
+  home_angle_bottom = settings.bottom_home;
+  home_angle_top = settings.top_home;
 
   // -------------------------------------------------
   // Commander setup
@@ -245,10 +405,13 @@ void setup() {
   command.add('B', doTargetBottom, "bottom/pan angle (rad), relative?");
   command.add('T', doTargetTop, "top/tilt angle (rad), relative?");
   command.add('M', doTargetBoth, "both: M<pan> <tilt>");
+  command.add('H', homeMotors, "Home: H");
   command.add('Y', bSetPID, "Bottom: P<P> <I> <D>");
   command.add('P', tSetPID, "Top: Y<P> <I> <D>");
-  command.add('X', getPos, "X: <Top (rad/s)> <Bottom (rad/s)>");
-  command.add('V', setVelocity, "Usage: V <motor (0 for bottom, 1 for top)> <velocity (rad/s)>");
+  command.add('X', getInfo, "Get Info: X");
+  command.add('V', setVelocity, "Set Velocity: V<motor (0 for bottom, 1 for top)> <velocity (rad/s)>");
+  command.add('L', setLPF, "Set LPF: V<motor (0 for bottom, 1 for top)> <seconds>");
+  command.add('S', saveSettings, "Save Settings: S <PID(0|1)> <Velocity(0|1)> <Home(0|1)>");
 
   Serial.println(F("=== 2D Gimbal Ready ==="));
   Serial.println(F("Commands:"));
@@ -257,16 +420,16 @@ void setup() {
   Serial.println(F("  M<pan> <tilt>   - set both angles"));
   Serial.println(F("  Example: B1.57  T0.5  M1.57 0.5"));
   _delay(1000);
-  target_angle_bottom = motorBottom.shaftAngle();
-  target_angle_top = motorTop.shaftAngle();
 }
+  
 
 
-// =====================================================
+//---------------------------------------
 // MAIN LOOP
-// =====================================================
+//---------------------------------------
+
 void loop() {
-  // Run FOC for both motors - keep this as fast as possible
+  // Run FOC for both motors
   motorBottom.loopFOC();
   motorTop.loopFOC();
 
