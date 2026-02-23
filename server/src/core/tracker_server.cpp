@@ -8,11 +8,15 @@
 namespace tracker {
 
 TrackerServer::TrackerServer() 
-    : running_(false) {
+    : running_(false),
+      lost_frames_count_(0),
+      use_roi_(false),
+      last_detection_size_(100.0f) {  // Initial guess for object size
     stats_.fps = 0.0f;
     stats_.frames_processed = 0;
     stats_.detections_count = 0;
     stats_.avg_detection_confidence = 0.0f;
+    search_roi_ = cv::Rect(0, 0, 0, 0);
 }
 
 TrackerServer::~TrackerServer() {
@@ -170,43 +174,18 @@ void TrackerServer::trackerLoop() {
 }
 
 void TrackerServer::processFrame(const void* frame_data, int width, int height) {
-    // Detect objects
-    auto detections = vision_->detect(frame_data, width, height);
+    // Convert to cv::Mat
+    cv::Mat frame(height, width, CV_8UC3, const_cast<void*>(frame_data));
     
-    if (detections.empty()) {
-        // No detection, predict only
-        if (estimator_->isInitialized()) {
-            float dt = 1.0f / config_.target_fps;
-            auto state = estimator_->predict(dt);
-            
-            // Send predicted position to motors
-            auto angles = computeGimbalAngles(state);
-            motor_->setTargetAngles(angles);
-        }
-        return;
+    // Run detection and tracking
+    auto result = detectAndTrack(frame);
+    
+    // Send commands to motor using Kalman-filtered current state
+    // This is already the optimal blend of prediction + measurement
+    if (result.has_state) {
+        auto angles = computeGimbalAngles(result.current_state);
+        motor_->setTargetAngles(angles);
     }
-    
-    // Use first (best) detection
-    const auto& detection = detections[0];
-    
-    {
-        std::lock_guard<std::mutex> lock(stats_mutex_);
-        stats_.detections_count++;
-        stats_.avg_detection_confidence = 
-            (stats_.avg_detection_confidence * (stats_.detections_count - 1) + 
-             detection.confidence) / stats_.detections_count;
-    }
-    
-    // Update estimator
-    if (!estimator_->isInitialized()) {
-        estimator_->initializeState(detection);
-    }
-    
-    auto state = estimator_->update(detection);
-    
-    // Compute gimbal angles and send to motors
-    auto angles = computeGimbalAngles(state);
-    motor_->setTargetAngles(angles);
 }
 
 GimbalAngles TrackerServer::computeGimbalAngles(const EstimatedState& state) {
@@ -229,92 +208,251 @@ GimbalAngles TrackerServer::computeGimbalAngles(const EstimatedState& state) {
     return GimbalAngles(pan_angle, tilt_angle);
 }
 
-void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
-    // Detect objects
-    auto detections = vision_->detect(frame.data, frame.cols, frame.rows);
+void TrackerServer::updateSearchROI(const EstimatedState& state, int frame_width, int frame_height) {
+    // Calculate velocity magnitude
+    float velocity_magnitude = std::sqrt(
+        state.velocity.vx * state.velocity.vx + 
+        state.velocity.vy * state.velocity.vy
+    );
     
-    // Track if we have a valid state to draw
-    EstimatedState current_state;
-    bool has_state = false;
+    // Velocity-adaptive ROI scaling
+    // Slow objects: base scale (6x), Fast objects: up to max scale (12x)
+    float velocity_factor = std::min(velocity_magnitude / VELOCITY_THRESHOLD, 1.0f);
+    float roi_scale = ROI_BASE_SCALE + velocity_factor * (ROI_MAX_SCALE - ROI_BASE_SCALE);
+    float roi_size = last_detection_size_ * roi_scale;
+    
+    // Predict where object will be in next frame (lead the target)
+    float dt = 1.0f / config_.target_fps;
+    float predicted_x = state.position.x + state.velocity.vx * dt;
+    float predicted_y = state.position.y + state.velocity.vy * dt;
+    
+    // Center ROI on predicted position
+    int roi_x = static_cast<int>(predicted_x - roi_size / 2);
+    int roi_y = static_cast<int>(predicted_y - roi_size / 2);
+    int roi_w = static_cast<int>(roi_size);
+    int roi_h = static_cast<int>(roi_size);
+    
+    // Clamp to frame boundaries
+    roi_x = std::max(0, std::min(roi_x, frame_width - roi_w));
+    roi_y = std::max(0, std::min(roi_y, frame_height - roi_h));
+    roi_w = std::min(roi_w, frame_width - roi_x);
+    roi_h = std::min(roi_h, frame_height - roi_y);
+    
+    search_roi_ = cv::Rect(roi_x, roi_y, roi_w, roi_h);
+    use_roi_ = true;
+}
+
+void TrackerServer::resetSearchROI() {
+    use_roi_ = false;
+    lost_frames_count_ = 0;
+    search_roi_ = cv::Rect(0, 0, 0, 0);
+}
+
+TrackerServer::TrackingResult TrackerServer::detectAndTrack(cv::Mat& frame) {
+    TrackingResult result;
+    result.has_detection = false;
+    result.has_state = false;
+    result.has_prediction = false;
+    result.roi_used = use_roi_ ? search_roi_ : cv::Rect(0, 0, frame.cols, frame.rows);
+    
+    // Prepare search region
+    cv::Mat search_region;
+    int roi_offset_x = 0;
+    int roi_offset_y = 0;
+    
+    if (use_roi_ && search_roi_.width > 0 && search_roi_.height > 0) {
+        // Clone the ROI to ensure contiguous memory
+        search_region = frame(search_roi_).clone();
+        roi_offset_x = search_roi_.x;
+        roi_offset_y = search_roi_.y;
+    } else {
+        search_region = frame;
+    }
+    
+    // Detect objects in search region
+    auto detections = vision_->detect(search_region.data, search_region.cols, search_region.rows);
+    
+    // Adjust detection coordinates back to full frame
+    for (auto& detection : detections) {
+        detection.center.x += roi_offset_x;
+        detection.center.y += roi_offset_y;
+        if (detection.has_bbox) {
+            detection.bbox.x += roi_offset_x;
+            detection.bbox.y += roi_offset_y;
+        }
+    }
     
     if (detections.empty()) {
+        lost_frames_count_++;
+        
+        // Early fallback: if using ROI and lost 2-4 frames, try full frame search
+        // This catches fast-moving objects that escape the ROI
+        if (use_roi_ && lost_frames_count_ >= FALLBACK_TRIGGER_FRAMES && lost_frames_count_ <= 4) {
+            auto full_detections = vision_->detect(frame.data, frame.cols, frame.rows);
+            
+            if (!full_detections.empty()) {
+                // Found it in full frame! Recover and continue tracking
+                detections = full_detections;
+                lost_frames_count_ = 0;
+                result.roi_used = cv::Rect(0, 0, frame.cols, frame.rows);  // Mark as full frame
+                std::cout << "[ROI Recovery] Object found in full-frame fallback search" << std::endl;
+                goto process_detection;  // Jump to detection processing
+            }
+        }
+        
+        // After sustained loss, reset to full-frame search permanently
+        if (lost_frames_count_ >= MAX_LOST_FRAMES) {
+            resetSearchROI();
+        }
+        
         // No detection, predict only
         if (estimator_->isInitialized()) {
             float dt = 1.0f / config_.target_fps;
-            current_state = estimator_->predict(dt);
-            has_state = true;
+            result.current_state = estimator_->predict(dt);
+            result.has_state = true;
             
-            // Send predicted position to motors
-            auto angles = computeGimbalAngles(current_state);
-            motor_->setTargetAngles(angles);
+            // Update ROI based on prediction (for next frame)
+            if (use_roi_) {
+                updateSearchROI(result.current_state, frame.cols, frame.rows);
+            }
+            
+            // Predict future position for visualization only (150ms look-ahead)
+            const float VIZ_LOOK_AHEAD = 0.15f;
+            result.predicted_state = estimator_->predict(VIZ_LOOK_AHEAD);
+            result.has_prediction = true;
         }
+        return result;
+    }
+    
+process_detection:
+    
+    // Reset lost frame counter on successful detection
+    lost_frames_count_ = 0;
+    
+    // Use first (best) detection
+    result.detection = detections[0];
+    result.has_detection = true;
+    
+    // Update last detection size for ROI calculation
+    if (result.detection.has_bbox) {
+        last_detection_size_ = std::max(result.detection.bbox.width, result.detection.bbox.height);
+    } else if (result.detection.radius > 0) {
+        last_detection_size_ = result.detection.radius * 2.0f;
+    }
+    
+    {
+        std::lock_guard<std::mutex> lock(stats_mutex_);
+        stats_.detections_count++;
+        stats_.avg_detection_confidence = 
+            (stats_.avg_detection_confidence * (stats_.detections_count - 1) + 
+             result.detection.confidence) / stats_.detections_count;
+    }
+    
+    // Update estimator - Kalman filter internally:
+    //   1. Predicts where ball should be based on previous state
+    //   2. Corrects prediction with new measurement (detection)
+    //   3. Returns optimal blend (Kalman gain determines weight)
+    if (!estimator_->isInitialized()) {
+        estimator_->initializeState(result.detection);
+        result.current_state = estimator_->getState();
     } else {
-        // Use first (best) detection
-        const auto& detection = detections[0];
-        
-        // Draw detection bounding box (GREEN)
-        if (detection.has_bbox) {
+        result.current_state = estimator_->update(result.detection);
+    }
+    result.has_state = true;
+    
+    // Update ROI for next frame
+    updateSearchROI(result.current_state, frame.cols, frame.rows);
+    
+    // Predict future position for visualization only (150ms look-ahead)
+    const float VIZ_LOOK_AHEAD = 0.15f;
+    result.predicted_state = estimator_->predict(VIZ_LOOK_AHEAD);
+    result.has_prediction = true;
+    
+    return result;
+}
+
+void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
+    // Run core detection and tracking logic
+    auto result = detectAndTrack(frame);
+    
+    // Send motor commands using Kalman-filtered current state
+    // This is already the optimal blend of prediction + measurement
+    if (result.has_state) {
+        auto angles = computeGimbalAngles(result.current_state);
+        motor_->setTargetAngles(angles);
+    }
+    
+    // === VISUALIZATION ===
+    
+    // Draw detection (GREEN)
+    if (result.has_detection) {
+        // Draw bounding box
+        if (result.detection.has_bbox) {
             cv::Rect rect(
-                static_cast<int>(detection.bbox.x),
-                static_cast<int>(detection.bbox.y),
-                static_cast<int>(detection.bbox.width),
-                static_cast<int>(detection.bbox.height)
+                static_cast<int>(result.detection.bbox.x),
+                static_cast<int>(result.detection.bbox.y),
+                static_cast<int>(result.detection.bbox.width),
+                static_cast<int>(result.detection.bbox.height)
             );
             cv::rectangle(frame, rect, cv::Scalar(0, 255, 0), 2);
         }
         
-        // Draw detection center (GREEN circle)
+        // Draw raw detection center (GREEN circle)
         cv::circle(frame, 
-                  cv::Point(static_cast<int>(detection.center.x), 
-                           static_cast<int>(detection.center.y)), 
+                  cv::Point(static_cast<int>(result.detection.center.x), 
+                           static_cast<int>(result.detection.center.y)), 
                   5, cv::Scalar(0, 255, 0), -1);
         
         // Draw radius circle if available
-        if (detection.radius > 0) {
+        if (result.detection.radius > 0) {
             cv::circle(frame,
-                      cv::Point(static_cast<int>(detection.center.x),
-                               static_cast<int>(detection.center.y)),
-                      static_cast<int>(detection.radius),
+                      cv::Point(static_cast<int>(result.detection.center.x),
+                               static_cast<int>(result.detection.center.y)),
+                      static_cast<int>(result.detection.radius),
                       cv::Scalar(0, 255, 0), 2);
         }
-        
-        {
-            std::lock_guard<std::mutex> lock(stats_mutex_);
-            stats_.detections_count++;
-            stats_.avg_detection_confidence = 
-                (stats_.avg_detection_confidence * (stats_.detections_count - 1) + 
-                 detection.confidence) / stats_.detections_count;
-        }
-        
-        // Update estimator
-        if (!estimator_->isInitialized()) {
-            estimator_->initializeState(detection);
-        }
-        
-        current_state = estimator_->update(detection);
-        has_state = true;
-        
-        // Compute gimbal angles and send to motors
-        auto angles = computeGimbalAngles(current_state);
-        motor_->setTargetAngles(angles);
     }
     
-    // Draw predicted/estimated position (BLUE circle)
-    if (has_state) {
+    // Draw search ROI (YELLOW rectangle)
+    if (result.roi_used.width > 0 && result.roi_used.height > 0 && use_roi_) {
+        cv::rectangle(frame, result.roi_used, cv::Scalar(0, 255, 255), 2);
+    }
+    
+    // Draw Kalman-filtered current state (BLUE circle) - WHERE GIMBAL AIMS
+    // This is the optimal blend of prediction + measurement from Kalman filter
+    if (result.has_state) {
         cv::circle(frame,
-                  cv::Point(static_cast<int>(current_state.position.x),
-                           static_cast<int>(current_state.position.y)),
-                  8, cv::Scalar(255, 0, 0), -1);
+                  cv::Point(static_cast<int>(result.current_state.position.x),
+                           static_cast<int>(result.current_state.position.y)),
+                  10, cv::Scalar(255, 0, 0), -1);  // Solid BLUE circle - gimbal aim point
         
-        // Draw velocity vector if significant (BLUE arrow)
-        float vel_magnitude = std::sqrt(current_state.velocity.vx * current_state.velocity.vx +
-                                       current_state.velocity.vy * current_state.velocity.vy);
+        // Draw velocity vector from current state (BLUE arrow)
+        float vel_magnitude = std::sqrt(result.current_state.velocity.vx * result.current_state.velocity.vx +
+                                       result.current_state.velocity.vy * result.current_state.velocity.vy);
         if (vel_magnitude > 1.0f) {
-            cv::Point start(static_cast<int>(current_state.position.x),
-                          static_cast<int>(current_state.position.y));
-            cv::Point end(static_cast<int>(current_state.position.x + current_state.velocity.vx * 0.1f),
-                         static_cast<int>(current_state.position.y + current_state.velocity.vy * 0.1f));
+            cv::Point start(static_cast<int>(result.current_state.position.x),
+                          static_cast<int>(result.current_state.position.y));
+            cv::Point end(static_cast<int>(result.current_state.position.x + result.current_state.velocity.vx * 0.5f),
+                         static_cast<int>(result.current_state.position.y + result.current_state.velocity.vy * 0.5f));
             cv::arrowedLine(frame, start, end, cv::Scalar(255, 0, 0), 2);
+        }
+    }
+    
+    // Draw predicted future position (RED circle) - visualization only, not used for control
+    if (result.has_prediction) {
+        cv::circle(frame,
+                  cv::Point(static_cast<int>(result.predicted_state.position.x),
+                           static_cast<int>(result.predicted_state.position.y)),
+                  8, cv::Scalar(0, 0, 255), 2);  // Hollow RED circle - expected future
+        
+        // Draw trajectory line from current to predicted
+        if (result.has_state) {
+            cv::line(frame,
+                    cv::Point(static_cast<int>(result.current_state.position.x),
+                             static_cast<int>(result.current_state.position.y)),
+                    cv::Point(static_cast<int>(result.predicted_state.position.x),
+                             static_cast<int>(result.predicted_state.position.y)),
+                    cv::Scalar(128, 128, 128), 1, cv::LINE_AA);  // Gray trajectory
         }
     }
     
@@ -337,8 +475,31 @@ void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
     cv::putText(frame, fps_text, cv::Point(10, 30),
                cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
     
+    // Draw velocity info
+    if (result.has_state) {
+        float velocity_magnitude = std::sqrt(
+            result.current_state.velocity.vx * result.current_state.velocity.vx +
+            result.current_state.velocity.vy * result.current_state.velocity.vy
+        );
+        
+        std::string vel_text = "Velocity: " + std::to_string(static_cast<int>(velocity_magnitude)) + " px/s";
+        cv::putText(frame, vel_text,
+                   cv::Point(10, 60),
+                   cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 1);
+    }
+    
+    // Draw ROI status
+    std::string roi_status = use_roi_ ? "ROI: Active" : "ROI: Full Frame";
+    if (lost_frames_count_ > 0) {
+        roi_status += " | Lost: " + std::to_string(lost_frames_count_);
+    }
+    cv::putText(frame, roi_status,
+               cv::Point(10, 90),
+               cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 1);
+    
     // Draw legend
-    cv::putText(frame, "Green: Detection | Blue: Predicted", cv::Point(10, frame.rows - 10),
+    cv::putText(frame, "Green: Detection | Blue: Kalman Filtered (Gimbal Aim) | Red: Expected Future", 
+               cv::Point(10, frame.rows - 10),
                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
 }
 
