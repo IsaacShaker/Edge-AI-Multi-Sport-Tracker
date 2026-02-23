@@ -11,6 +11,7 @@
 #include <atomic>
 #include <mutex>
 #include <chrono>
+#include <fstream>
 #include <opencv2/opencv.hpp>
 
 namespace tracker {
@@ -119,6 +120,12 @@ private:
     int lost_frames_count_;            // Consecutive frames without detection
     bool use_roi_;                     // Whether to use ROI search
     float last_detection_size_;        // Size of last successful detection
+    
+    // Prediction Error Logging
+    std::ofstream prediction_log_;     // CSV log file for prediction analysis
+    EstimatedState last_prediction_;   // Previous frame's prediction for comparison
+    bool has_last_prediction_;         // Whether we have a previous prediction to compare
+    int frame_count_;                  // Frame counter for logging
     
     /**
      * @brief Main tracking loop (runs in separate thread)

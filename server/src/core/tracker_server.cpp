@@ -3,6 +3,8 @@
 #include "../include/factories/estimator_factory.h"
 #include "../include/factories/motor_factory.h"
 #include <iostream>
+#include <fstream>
+#include <cmath>
 #include <opencv2/opencv.hpp>
 
 namespace tracker {
@@ -11,7 +13,9 @@ TrackerServer::TrackerServer()
     : running_(false),
       lost_frames_count_(0),
       use_roi_(false),
-      last_detection_size_(100.0f) {  // Initial guess for object size
+      last_detection_size_(100.0f),
+      has_last_prediction_(false),
+      frame_count_(0) {  // Initial guess for object size
     stats_.fps = 0.0f;
     stats_.frames_processed = 0;
     stats_.detections_count = 0;
@@ -22,6 +26,9 @@ TrackerServer::TrackerServer()
 TrackerServer::~TrackerServer() {
     if (running_) {
         stop();
+    }
+    if (prediction_log_.is_open()) {
+        prediction_log_.close();
     }
 }
 
@@ -58,6 +65,15 @@ bool TrackerServer::initialize(const ServerConfig& config) {
     if (!motor_->connect()) {
         std::cerr << "Failed to connect motor controller" << std::endl;
         return false;
+    }
+    
+    // Initialize prediction error logging
+    prediction_log_.open("prediction_log.csv");
+    if (prediction_log_.is_open()) {
+        prediction_log_ << "frame,predicted_x,predicted_y,actual_x,actual_y,velocity,error,timestamp_ms\n";
+        std::cout << "Prediction logging enabled: prediction_log.csv" << std::endl;
+    } else {
+        std::cerr << "Warning: Could not open prediction log file" << std::endl;
     }
     
     std::cout << "=== Tracker Server Initialized ===" << std::endl;
@@ -359,6 +375,43 @@ process_detection:
         result.current_state = estimator_->update(result.detection);
     }
     result.has_state = true;
+    
+    // Log prediction error (compare last frame's prediction with current actual position)
+    if (has_last_prediction_ && prediction_log_.is_open()) {
+        // Calculate prediction error
+        float error_x = result.current_state.position.x - last_prediction_.position.x;
+        float error_y = result.current_state.position.y - last_prediction_.position.y;
+        float error = std::sqrt(error_x * error_x + error_y * error_y);
+        
+        // Calculate velocity magnitude
+        float velocity = std::sqrt(
+            result.current_state.velocity.vx * result.current_state.velocity.vx +
+            result.current_state.velocity.vy * result.current_state.velocity.vy
+        );
+        
+        // Get timestamp
+        auto now = std::chrono::steady_clock::now();
+        auto timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now.time_since_epoch()).count();
+        
+        // Log: frame, predicted_x, predicted_y, actual_x, actual_y, velocity, error, timestamp
+        prediction_log_ << frame_count_ << ","
+                       << last_prediction_.position.x << ","
+                       << last_prediction_.position.y << ","
+                       << result.current_state.position.x << ","
+                       << result.current_state.position.y << ","
+                       << velocity << ","
+                       << error << ","
+                       << timestamp_ms << "\n";
+        prediction_log_.flush();  // Ensure data is written
+    }
+    
+    frame_count_++;
+    
+    // Store prediction for next frame (predict one frame ahead)
+    float dt = 1.0f / config_.target_fps;
+    last_prediction_ = estimator_->predict(dt);
+    has_last_prediction_ = true;
     
     // Update ROI for next frame
     updateSearchROI(result.current_state, frame.cols, frame.rows);
