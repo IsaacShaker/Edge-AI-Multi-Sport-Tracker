@@ -232,6 +232,25 @@ void getInfo(char* cmd) {
 
 }
 
+void lock_motors(char* cmd){
+  float enableMotor;
+  if (sscanf(cmd, "%f", &enableMotor) == 1){
+    if(enableMotor){
+      motorBottom.enable();
+      motorTop.enable();
+      Serial.println("Motors Enabled");
+    }
+    else{
+      motorTop.disable();
+      motorBottom.disable();
+      Serial.println("Motors Disabled");
+    }
+  }
+  else{
+    Serial.println("Usage: K <(0 for disable, 1 for enable)>");
+  }
+}
+
 void saveSettings(char* cmd){
   float pidSet, vSet, homeSet;
 
@@ -398,6 +417,8 @@ void setup() {
   target_angle_top = motorTop.shaftAngle();
   home_angle_bottom = settings.bottom_home;
   home_angle_top = settings.top_home;
+  motorBottom.disable();
+  motorTop.disable();
 
   // -------------------------------------------------
   // Commander setup
@@ -409,16 +430,13 @@ void setup() {
   command.add('Y', bSetPID, "Bottom: P<P> <I> <D>");
   command.add('P', tSetPID, "Top: Y<P> <I> <D>");
   command.add('X', getInfo, "Get Info: X");
+  command.add('K', lock_motors, "Enable Motors: K<0 for Disable, 1 for Enable>");
   command.add('V', setVelocity, "Set Velocity: V<motor (0 for bottom, 1 for top)> <velocity (rad/s)>");
   command.add('L', setLPF, "Set LPF: V<motor (0 for bottom, 1 for top)> <seconds>");
   command.add('S', saveSettings, "Save Settings: S <PID(0|1)> <Velocity(0|1)> <Home(0|1)>");
 
   Serial.println(F("=== 2D Gimbal Ready ==="));
-  Serial.println(F("Commands:"));
-  Serial.println(F("  B<angle>        - set pan/bottom angle (rad)"));
-  Serial.println(F("  T<angle>        - set tilt/top angle (rad)"));
-  Serial.println(F("  M<pan> <tilt>   - set both angles"));
-  Serial.println(F("  Example: B1.57  T0.5  M1.57 0.5"));
+  Serial.println(F("ATTENTION: Motors initialized as disabled!"));
   _delay(1000);
 }
   

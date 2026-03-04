@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 import time
+import math
 from dataclasses import dataclass
 from typing import Optional
 
@@ -71,6 +72,7 @@ class DriveDebugApp(QtWidgets.QWidget):
         self.ui.pSetLPF.clicked.connect(lambda: self.send_LPF(axis="pitch"))
         self.ui.ySetLPF.clicked.connect(lambda: self.send_LPF(axis="yaw"))
 
+        self.ui.motorEN.toggled.connect(self.motor_enable)
         self.ui.saveSettings.clicked.connect(lambda: self.save_settings(settingType="all"))
         self.ui.setHome.clicked.connect(lambda: self.save_settings(settingType="home"))
 
@@ -274,6 +276,12 @@ class DriveDebugApp(QtWidgets.QWidget):
             lowPass = float(self.ui.yLPF.value())
             self.write_line(f"L{motor:.3f} {lowPass:.3f}")
     
+    def motor_enable(self, checked) -> None:
+        if checked:
+            self.write_line(f"K1")
+        else:
+            self.write_line(f"K0")
+
     def get_settings(self) -> None:
         self.write_line(f"X")
 
@@ -286,89 +294,63 @@ class DriveDebugApp(QtWidgets.QWidget):
 
     #Fun programs for demonstration purposes.
     def full_scan_mode(self):
-        #total sweep time and frequency of commands.
-        sweep_time = 5.0
-        dt = 0.02 #50hz
+        sweep_time = 5
+        dt = 0.01   # 100 Hz
 
-        #Start and end position in rad
-        pitch_start = 0.2
-        pitch_end = 1.3
-        yaw_start = 1.5
-        yaw_end = 3.3
+        # Limits
+        pitch_min = 1.5
+        pitch_max = 2.8
+        yaw_min   = 1.5
+        yaw_max   = 3.3
 
-        #Sweep motion
-        yaw_diff = yaw_start - yaw_end
-        pitch_diff = pitch_start - pitch_end
+        # Midpoints + amplitudes
+        pitch_mid = (pitch_min + pitch_max) / 2
+        pitch_amp = (pitch_max - pitch_min) / 2
 
-        #amount of steps needed for frequency and range.
-        steps = int(sweep_time / dt)
-        yaw_diff   = yaw_end   - yaw_start
-        pitch_diff = pitch_end - pitch_start
-        yaw_increment   = yaw_diff / (steps - 1)
-        pitch_increment = pitch_diff / (steps - 1)
+        yaw_mid = (yaw_min + yaw_max) / 2
+        yaw_amp = (yaw_max - yaw_min) / 2
 
-        yaw = yaw_start
-        pitch = pitch_start
+        start_time = time.time()
 
-        #forward sweep
-        for i in range(steps):
-            self.write_line(f"B{yaw:.3f} 0")
-            self.write_line(f"T{pitch:.3f} 0")
-            yaw   += yaw_increment
-            pitch += pitch_increment
-            time.sleep(dt)
-        
-        #camera readjust
-        for i in range(steps):
-            t = i / (steps - 1)
+        # Run exactly one sinusoidal cycle
+        while (time.time() - start_time) < sweep_time:
+            elapsed = time.time() - start_time
+            theta = 2 * math.pi * (elapsed / sweep_time)
 
-            pitch = pitch_end - t * (pitch_end - pitch_start)
+            # Smooth sinusoidal motion
+            yaw = yaw_mid + yaw_amp * math.sin(theta)
+            pitch = pitch_mid + pitch_amp * math.sin(theta)
 
-            # Hold yaw at final value
-            self.write_line(f"B{yaw_end:.3f} 0")
-            self.write_line(f"T{pitch:.3f} 0")
+            self.write_line(f"B{yaw:.4f} 0")
+            self.write_line(f"T{pitch:.4f} 0")
 
             time.sleep(dt)
-        
-        #reverse sweep
-        for i in range(steps):
-            self.write_line(f"B{yaw:.3f} 0")
-            self.write_line(f"T{pitch:.3f} 0")
-            yaw   -= yaw_increment
-            pitch += pitch_increment
-            time.sleep(dt)
+
+        # Optional: finish centered
+        self.write_line(f"B{yaw_mid:.4f} 0")
+        self.write_line(f"T{pitch_mid:.4f} 0")
     
     def yaw_scan_mode(self):
-        #total sweep time and frequency of commands.
-        sweep_time = 5.0
-        dt = 0.02 #50hz
+        sweep_time = 5.0          # full cycle duration (seconds)
+        dt = 0.01                 # 100 Hz update (smoother than 50 Hz)
 
-        #Start and end position in rad
-        yaw_start = 1.5
-        yaw_end = 3.3
+        yaw_min = 1.5
+        yaw_max = 3.3
+        yaw_mid = (yaw_min + yaw_max) / 2
+        yaw_amp = (yaw_max - yaw_min) / 2
 
-        #Sweep motion
-        yaw_diff = yaw_start - yaw_end
+        t = 0.0
+        start_time = time.time()
 
-        #amount of steps needed for frequency and range.
-        steps = int(sweep_time / dt)
-        yaw_diff   = yaw_end   - yaw_start
-        yaw_increment   = yaw_diff / (steps - 1)
-        yaw = yaw_start
+        while (time.time() - start_time) < sweep_time:
+            elapsed = time.time() - start_time
+            theta = 2 * math.pi * (elapsed / sweep_time)
 
-        #forward sweep
-        for i in range(steps):
-            self.write_line(f"B{yaw:.3f} 0")
-            yaw   += yaw_increment
+            # Smooth sinusoidal position
+            yaw = yaw_mid + yaw_amp * math.sin(theta)
+
+            self.write_line(f"B{yaw:.4f} 0")
             time.sleep(dt)
-        
-        
-        #reverse sweep
-        for i in range(steps):
-            self.write_line(f"B{yaw:.3f} 0")
-            yaw   -= yaw_increment
-            time.sleep(dt)
-
 
         
     #

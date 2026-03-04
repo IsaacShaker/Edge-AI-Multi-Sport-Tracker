@@ -223,10 +223,10 @@
        <item row="14" column="0">
         <widget class="QDoubleSpinBox" name="pLPF">
          <property name="maximum">
-          <double>1.000000000000000</double>
+          <double>10.000000000000000</double>
          </property>
          <property name="singleStep">
-          <double>0.005000000000000</double>
+          <double>0.100000000000000</double>
          </property>
         </widget>
        </item>
@@ -253,6 +253,42 @@
      </item>
      <item row="0" column="2">
       <layout class="QGridLayout" name="gridLayout_6">
+       <item row="10" column="0" colspan="2">
+        <spacer name="verticalSpacer_7">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeType">
+          <enum>QSizePolicy::Fixed</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>10</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item row="11" column="0" colspan="2">
+        <widget class="QLabel" name="label_17">
+         <property name="text">
+          <string>Global Settings</string>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="0">
+        <widget class="QPushButton" name="refreshCOM">
+         <property name="maximumSize">
+          <size>
+           <width>92</width>
+           <height>30</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>REFRESH</string>
+         </property>
+        </widget>
+       </item>
        <item row="4" column="1">
         <widget class="QPushButton" name="selectCOM">
          <property name="maximumSize">
@@ -263,6 +299,52 @@
          </property>
          <property name="text">
           <string>Select COM</string>
+         </property>
+        </widget>
+       </item>
+       <item row="14" column="0" colspan="2">
+        <spacer name="verticalSpacer_5">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item row="0" column="0" alignment="Qt::AlignTop">
+        <widget class="QLabel" name="label_11">
+         <property name="font">
+          <font>
+           <pointsize>12</pointsize>
+           <weight>75</weight>
+           <bold>true</bold>
+          </font>
+         </property>
+         <property name="text">
+          <string>General</string>
+         </property>
+        </widget>
+       </item>
+       <item row="12" column="0" colspan="2" alignment="Qt::AlignHCenter">
+        <widget class="QPushButton" name="getSettings">
+         <property name="minimumSize">
+          <size>
+           <width>180</width>
+           <height>30</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>180</width>
+           <height>50</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>Return Settings</string>
          </property>
         </widget>
        </item>
@@ -282,69 +364,7 @@
          </property>
         </spacer>
        </item>
-       <item row="0" column="0" alignment="Qt::AlignTop">
-        <widget class="QLabel" name="label_11">
-         <property name="font">
-          <font>
-           <pointsize>12</pointsize>
-           <weight>75</weight>
-           <bold>true</bold>
-          </font>
-         </property>
-         <property name="text">
-          <string>General</string>
-         </property>
-        </widget>
-       </item>
-       <item row="13" column="0" colspan="2">
-        <spacer name="verticalSpacer_5">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>20</width>
-           <height>40</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-       <item row="11" column="0" colspan="2" alignment="Qt::AlignHCenter">
-        <widget class="QPushButton" name="getSettings">
-         <property name="minimumSize">
-          <size>
-           <width>180</width>
-           <height>30</height>
-          </size>
-         </property>
-         <property name="maximumSize">
-          <size>
-           <width>180</width>
-           <height>50</height>
-          </size>
-         </property>
-         <property name="text">
-          <string>Return Settings</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="0" rowspan="2" colspan="2" alignment="Qt::AlignHCenter">
-        <widget class="QListView" name="comList">
-         <property name="minimumSize">
-          <size>
-           <width>80</width>
-           <height>50</height>
-          </size>
-         </property>
-         <property name="maximumSize">
-          <size>
-           <width>200</width>
-           <height>60</height>
-          </size>
-         </property>
-        </widget>
-       </item>
-       <item row="7" column="0" alignment="Qt::AlignHCenter">
+       <item row="8" column="0" alignment="Qt::AlignHCenter">
         <widget class="QPushButton" name="homeMotors">
          <property name="minimumSize">
           <size>
@@ -368,7 +388,7 @@
          </property>
         </widget>
        </item>
-       <item row="7" column="1" alignment="Qt::AlignHCenter">
+       <item row="8" column="1" alignment="Qt::AlignHCenter">
         <widget class="QPushButton" name="setHome">
          <property name="minimumSize">
           <size>
@@ -387,7 +407,23 @@
          </property>
         </widget>
        </item>
-       <item row="12" column="0" colspan="2" alignment="Qt::AlignHCenter">
+       <item row="2" column="0" rowspan="2" colspan="2" alignment="Qt::AlignHCenter">
+        <widget class="QListView" name="comList">
+         <property name="minimumSize">
+          <size>
+           <width>80</width>
+           <height>50</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>200</width>
+           <height>60</height>
+          </size>
+         </property>
+        </widget>
+       </item>
+       <item row="13" column="0" colspan="2" alignment="Qt::AlignHCenter">
         <widget class="QPushButton" name="saveSettings">
          <property name="minimumSize">
           <size>
@@ -406,43 +442,7 @@
          </property>
         </widget>
        </item>
-       <item row="4" column="0">
-        <widget class="QPushButton" name="refreshCOM">
-         <property name="maximumSize">
-          <size>
-           <width>92</width>
-           <height>30</height>
-          </size>
-         </property>
-         <property name="text">
-          <string>REFRESH</string>
-         </property>
-        </widget>
-       </item>
-       <item row="9" column="0" colspan="2">
-        <spacer name="verticalSpacer_7">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
-         </property>
-         <property name="sizeType">
-          <enum>QSizePolicy::Fixed</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>20</width>
-           <height>10</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-       <item row="10" column="0" colspan="2">
-        <widget class="QLabel" name="label_17">
-         <property name="text">
-          <string>Global Settings</string>
-         </property>
-        </widget>
-       </item>
-       <item row="8" column="0" colspan="2" alignment="Qt::AlignHCenter">
+       <item row="9" column="0" colspan="2" alignment="Qt::AlignHCenter">
         <widget class="QPushButton" name="bothAngleSet">
          <property name="minimumSize">
           <size>
@@ -458,13 +458,6 @@
          </property>
          <property name="text">
           <string>TARGET BOTH</string>
-         </property>
-        </widget>
-       </item>
-       <item row="6" column="0" colspan="2">
-        <widget class="QLabel" name="label_16">
-         <property name="text">
-          <string>Positional</string>
          </property>
         </widget>
        </item>
@@ -484,6 +477,35 @@
          </property>
          <property name="text">
           <string>COM Selection</string>
+         </property>
+        </widget>
+       </item>
+       <item row="6" column="0" colspan="2">
+        <widget class="QLabel" name="label_16">
+         <property name="text">
+          <string>Positional</string>
+         </property>
+        </widget>
+       </item>
+       <item row="7" column="0" colspan="2" alignment="Qt::AlignHCenter">
+        <widget class="QPushButton" name="motorEN">
+         <property name="minimumSize">
+          <size>
+           <width>180</width>
+           <height>30</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>180</width>
+           <height>30</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>ENABLE MOTORS</string>
+         </property>
+         <property name="checkable">
+          <bool>true</bool>
          </property>
         </widget>
        </item>
@@ -691,7 +713,14 @@
         </widget>
        </item>
        <item row="15" column="0">
-        <widget class="QDoubleSpinBox" name="yLPF"/>
+        <widget class="QDoubleSpinBox" name="yLPF">
+         <property name="maximum">
+          <double>10.000000000000000</double>
+         </property>
+         <property name="singleStep">
+          <double>0.100000000000000</double>
+         </property>
+        </widget>
        </item>
        <item row="15" column="1">
         <widget class="QPushButton" name="ySetLPF">
