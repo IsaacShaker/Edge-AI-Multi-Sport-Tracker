@@ -1,6 +1,7 @@
 #include <SimpleFOC.h>
 #include <EEPROM.h>
 #include "gimbal_settings.h"
+#include "power_telemetry.h"
 
 //---------------------------------------
 //    SENSOR CONFIGURATION
@@ -30,6 +31,11 @@ float target_angle_top = 0;     // tilt/pitch target (radians)
 
 float home_angle_bottom = 0;  // pan/yaw target (radians)
 float home_angle_top = 0;     // tilt/pitch target (radians)
+
+bool returnPosition = false; //Position Logging (Serial)
+unsigned long last_time = 0;
+uint32_t counter = 0;
+
 
 
 //---------------------------------------
@@ -88,8 +94,6 @@ void doTargetBoth(char* cmd) {
   if (sscanf(cmd, "%f %f", &pan, &tilt) == 2) {
     target_angle_bottom = pan;
     target_angle_top = tilt;
-    Serial.print("Pan: "); Serial.print(pan, 3);
-    Serial.print(" | Tilt: "); Serial.println(tilt, 3);
   } else {
     Serial.println("Usage: M<pan> <tilt>  (e.g., M1.57 0.5)");
   }
@@ -251,6 +255,24 @@ void lock_motors(char* cmd){
   }
 }
 
+void recordData(char* cmd){
+  float recordData;
+  if (sscanf(cmd, "%f", &recordData) == 1){
+    if(recordData){
+      returnPosition = true;
+      last_time = 0;
+      counter = 0;
+
+    }
+    else{
+      returnPosition = false;
+    }
+  }
+  else{
+    Serial.println("Usage: I <(0 for disable, 1 for enable)>");
+  }
+}
+
 void saveSettings(char* cmd){
   float pidSet, vSet, homeSet;
 
@@ -298,6 +320,8 @@ void saveSettings(char* cmd){
     Serial.println("SAVE ERROR | Usage: S<pid> <vel> <home>  (ex: S1 0 1)");
   }
 }
+
+
 
 
 
@@ -430,6 +454,7 @@ void setup() {
   command.add('Y', bSetPID, "Bottom: P<P> <I> <D>");
   command.add('P', tSetPID, "Top: Y<P> <I> <D>");
   command.add('X', getInfo, "Get Info: X");
+  command.add('I', recordData, "Record Positional Data: I");
   command.add('K', lock_motors, "Enable Motors: K<0 for Disable, 1 for Enable>");
   command.add('V', setVelocity, "Set Velocity: V<motor (0 for bottom, 1 for top)> <velocity (rad/s)>");
   command.add('L', setLPF, "Set LPF: V<motor (0 for bottom, 1 for top)> <seconds>");
@@ -454,6 +479,17 @@ void loop() {
   // Position control updates
   motorBottom.move(target_angle_bottom);
   motorTop.move(target_angle_top);
+
+  //return positional telemetry (if enabled)
+  if(returnPosition){
+    if (millis() - last_time >= 10) {
+      last_time = millis();
+      counter += 10;
+      Serial.print("Timer_ms: "); Serial.print(counter);
+      Serial.print("T_pos: "); Serial.println(motorTop.shaftAngle(), 3);
+      Serial.print("B_pos: "); Serial.println(motorBottom.shaftAngle(), 3);
+    }
+  }
 
   // Serial command processing
   command.run();

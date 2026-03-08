@@ -73,6 +73,7 @@ class DriveDebugApp(QtWidgets.QWidget):
         self.ui.ySetLPF.clicked.connect(lambda: self.send_LPF(axis="yaw"))
 
         self.ui.motorEN.toggled.connect(self.motor_enable)
+        self.ui.livePosTelem.toggled.connect(self.get_pos_telem)
         self.ui.saveSettings.clicked.connect(lambda: self.save_settings(settingType="all"))
         self.ui.setHome.clicked.connect(lambda: self.save_settings(settingType="home"))
 
@@ -281,6 +282,13 @@ class DriveDebugApp(QtWidgets.QWidget):
             self.write_line(f"K1")
         else:
             self.write_line(f"K0")
+
+    def get_pos_telem(self, checked) -> None:
+        if checked:
+            self.write_line(f"I1")
+        else:
+            self.write_line(f"I0")
+
 
     def get_settings(self) -> None:
         self.write_line(f"X")
