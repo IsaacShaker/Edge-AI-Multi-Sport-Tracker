@@ -258,10 +258,11 @@ void lock_motors(char* cmd){
 void recordData(char* cmd){
   float recordData;
   if (sscanf(cmd, "%f", &recordData) == 1){
-    if(recordData){
+    if(recordData){ 
       returnPosition = true;
       last_time = 0;
       counter = 0;
+      Serial.println("time_ms,top_angle,bottom_angle");
 
     }
     else{
@@ -480,14 +481,18 @@ void loop() {
   motorBottom.move(target_angle_bottom);
   motorTop.move(target_angle_top);
 
-  //return positional telemetry (if enabled)
+  //return positional telemetry (if enabled) in CSV format.
   if(returnPosition){
     if (millis() - last_time >= 10) {
-      last_time = millis();
+      last_time += 10;
       counter += 10;
-      Serial.print("Timer_ms: "); Serial.print(counter);
-      Serial.print("T_pos: "); Serial.println(motorTop.shaftAngle(), 3);
-      Serial.print("B_pos: "); Serial.println(motorBottom.shaftAngle(), 3);
+
+      Serial.print(",");
+      Serial.print(counter);                   // time
+      Serial.print(",");
+      Serial.print(motorTop.shaftAngle(), 3);  // top motor
+      Serial.print(",");
+      Serial.println(motorBottom.shaftAngle(), 3); // bottom motor
     }
   }
 
