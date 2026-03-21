@@ -28,6 +28,7 @@ void printUsage() {
     std::cout << "  --motor <type>        Motor controller type (simplefoc, mock)" << std::endl;
     std::cout << "  --camera <id>         Camera device ID (default: 0)" << std::endl;
     std::cout << "  --no-viz              Disable visualization" << std::endl;
+    std::cout << "  --no-roi              Disable ROI optimization (always use full frame)" << std::endl;
     std::cout << "  --help                Show this help message" << std::endl;
 }
 
@@ -53,9 +54,11 @@ int main(int argc, char** argv) {
     ServerConfig config;
     
     // Default configuration
-    config.vision.model_type = "color_based";
-    config.estimator.estimator_type = "imm";
+    config.vision.model_type = "color_based";  // Using color-based until YOLO is implemented
+    config.estimator.estimator_type = "kalman_ca";  // Constant acceleration model (handles changing velocity)
     config.motor.controller_type = "mock";
+    
+    bool enable_roi = true;  // ROI optimization enabled by default
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -80,6 +83,9 @@ int main(int argc, char** argv) {
         else if (arg == "--no-viz") {
             config.enable_visualization = false;
         }
+        else if (arg == "--no-roi") {
+            enable_roi = false;
+        }
         else {
             std::cerr << "Unknown option: " << arg << std::endl;
             printUsage();
@@ -93,6 +99,7 @@ int main(int argc, char** argv) {
     std::cout << "Estimator: " << config.estimator.estimator_type << std::endl;
     std::cout << "Motor:     " << config.motor.controller_type << std::endl;
     std::cout << "Camera:    " << config.camera_device_id << std::endl;
+    std::cout << "ROI:       " << (enable_roi ? "Enabled" : "Disabled") << std::endl;
     std::cout << "=====================\n" << std::endl;
     
     // Create and initialize server
@@ -101,6 +108,11 @@ int main(int argc, char** argv) {
     if (!g_server->initialize(config)) {
         std::cerr << "Failed to initialize tracker server" << std::endl;
         return 1;
+    }
+    
+    // Disable ROI if requested
+    if (!enable_roi) {
+        g_server->disableROI();
     }
     
     // Setup signal handlers

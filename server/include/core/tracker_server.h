@@ -11,6 +11,7 @@
 #include <atomic>
 #include <mutex>
 #include <chrono>
+#include <fstream>
 #include <opencv2/opencv.hpp>
 
 namespace tracker {
@@ -54,6 +55,13 @@ public:
     TrackerServer();
     ~TrackerServer();
     
+    // ROI tracking parameters
+    static constexpr float ROI_BASE_SCALE = 6.0f;      // Base ROI scale for slow objects
+    static constexpr float ROI_MAX_SCALE = 12.0f;      // Max ROI scale for fast objects
+    static constexpr float VELOCITY_THRESHOLD = 100.0f; // px/s threshold for max scale
+    static constexpr int MAX_LOST_FRAMES = 10;         // Frames before full-frame search
+    static constexpr int FALLBACK_TRIGGER_FRAMES = 2;  // Frames before trying full-frame fallback
+    
     /**
      * @brief Initialize server with configuration
      */
@@ -68,6 +76,11 @@ public:
      * @brief Stop the tracking loop
      */
     void stop();
+    
+    /**
+     * @brief Disable ROI optimization (use full-frame search only)
+     */
+    void disableROI() { use_roi_ = false; }
     
     /**
      * @brief Check if server is running
@@ -102,10 +115,50 @@ private:
     Stats stats_;
     std::chrono::steady_clock::time_point last_frame_time_;
     
+    // ROI Tracking
+    cv::Rect search_roi_;              // Current search region
+    int lost_frames_count_;            // Consecutive frames without detection
+    bool use_roi_;                     // Whether to use ROI search
+    float last_detection_size_;        // Size of last successful detection
+    
+    // Prediction Error Logging
+    std::ofstream prediction_log_;     // CSV log file for prediction analysis
+    EstimatedState last_prediction_;   // Previous frame's prediction for comparison
+    bool has_last_prediction_;         // Whether we have a previous prediction to compare
+    int frame_count_;                  // Frame counter for logging
+    
     /**
      * @brief Main tracking loop (runs in separate thread)
      */
     void trackerLoop();
+    
+    /**
+     * @brief Update search ROI based on predicted position
+     */
+    void updateSearchROI(const EstimatedState& state, int frame_width, int frame_height);
+    
+    /**
+     * @brief Reset to full-frame search
+     */
+    void resetSearchROI();
+    
+    /**
+     * @brief Core detection and tracking results
+     */
+    struct TrackingResult {
+        Detection detection;
+        EstimatedState current_state;      // Kalman-filtered state (optimal blend of prediction + measurement)
+        EstimatedState predicted_state;    // Future prediction for visualization only
+        bool has_detection;
+        bool has_state;
+        bool has_prediction;                // Whether predicted_state is valid
+        cv::Rect roi_used;
+    };
+    
+    /**
+     * @brief Core detection and tracking logic (shared by both process methods)
+     */
+    TrackingResult detectAndTrack(cv::Mat& frame);
     
     /**
      * @brief Process a single frame

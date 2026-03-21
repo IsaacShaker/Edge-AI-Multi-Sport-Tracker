@@ -76,6 +76,10 @@ EstimatedState KalmanFilterCV::update(const Detection& detection) {
         return current_state_;
     }
     
+    // STEP 1: PREDICT - propagate state forward in time using motion model
+    kf_.predict();
+    
+    // STEP 2: CORRECT - update with measurement
     cv::Mat measurement = (cv::Mat_<float>(3, 1) << 
         detection.center.x,
         detection.center.y,
