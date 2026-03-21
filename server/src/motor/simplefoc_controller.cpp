@@ -78,7 +78,8 @@ bool SimpleFOCController::setTargetAngles(const GimbalAngles& angles) {
     
     // Send command: "B<pan> T<tilt>"
     char cmd[64];
-    snprintf(cmd, sizeof(cmd), "B%.4f T%.4f", pan, tilt);
+    snprintf(cmd, sizeof(cmd), "B%.3f 1.0", pan);
+    snprintf(cmd, sizeof(cmd), "T%.3f 1.0", tilt);
     
     if (!sendCommand(cmd)) {
         return false;
@@ -99,7 +100,8 @@ bool SimpleFOCController::stop() {
     }
     
     // Set target to current position
-    return sendCommand("STOP");
+    return sendCommand("S0 0 1");
+    return sendCommand("H");
 }
 
 bool SimpleFOCController::home() {
