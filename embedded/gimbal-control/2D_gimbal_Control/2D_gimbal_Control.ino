@@ -29,6 +29,12 @@ BLDCDriver3PWM driverTop = BLDCDriver3PWM(6,7,8,5);  // PWM pins + enable
 float target_angle_bottom = 0;  // pan/yaw target (radians)
 float target_angle_top = 0;     // tilt/pitch target (radians)
 
+//ADJUST HARD LIMITS IF NEEDED
+float target_angle_bottom_min = 1.5; // pan/yaw target angle minimum
+float target_angle_bottom_max = 3.5; // pan/yaw target angle maximum
+float target_angle_top_min = -5.0; // tilt/pitch target angle minimum
+float target_angle_top_max = -3.0; // tilt/pitch target angle maximum
+
 float home_angle_bottom = 0;  // pan/yaw target (radians)
 float home_angle_top = 0;     // tilt/pitch target (radians)
 
@@ -48,6 +54,19 @@ Settings settings;  //Instatiate the gimbal settings.
 //---------------------------------------
 Commander command = Commander(Serial);
 
+float checkBounds(int motor, float angle_in){
+  if(motor == 0){
+    if(angle_in < target_angle_bottom_min) return target_angle_bottom_min;
+    if(angle_in > target_angle_bottom_max) return target_angle_bottom_max;
+  }
+  if(motor == 1){
+    if(angle_in < target_angle_top_min) return target_angle_top_min;
+    if(angle_in > target_angle_top_max) return target_angle_top_max;
+  }
+  return angle_in;
+}
+
+
 void doTargetBottom(char* cmd) {
   command.scalar(&target_angle_bottom, cmd);
   float target, relative;
@@ -55,17 +74,16 @@ void doTargetBottom(char* cmd) {
   //else, send non-relative location offset.
   if (sscanf(cmd, "%f %f", &target, &relative) == 2) {
     if(relative == 1){
-      target_angle_bottom = fmod(motorBottom.shaftAngle() + target, 6.28f);
+      target_angle_bottom = checkBounds(0, (fmod(motorBottom.shaftAngle() + target, 6.28f)));
     }
     else{
-      target_angle_bottom = fmod(target, 6.28f);
+      target_angle_bottom = checkBounds(0, (fmod(target, 6.28f)));
     }
   }
   else{
     Serial.println("Usage: B<angle> <relative?>  (e.g., B1.0 1)");
   }
 }
-
 
 void doTargetTop(char* cmd) {
   command.scalar(&target_angle_top, cmd);
@@ -74,10 +92,10 @@ void doTargetTop(char* cmd) {
   //else, send non-relative location offset.
   if (sscanf(cmd, "%f %f", &target, &relative) == 2) {
     if(relative == 1){
-      target_angle_top = fmod(motorTop.shaftAngle() + target, 6.28f);
+      target_angle_top = checkBounds(1, (fmod(motorTop.shaftAngle() + target, 6.28f)));
     }
     else{
-      target_angle_top = fmod(target, 6.28f);
+      target_angle_top = checkBounds(1, (fmod(target, 6.28f)));
     }
     
   }
