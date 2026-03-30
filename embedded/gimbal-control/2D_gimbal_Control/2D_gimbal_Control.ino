@@ -110,8 +110,8 @@ void doTargetBoth(char* cmd) {
   // Parse two floats from the command string
   float pan, tilt;
   if (sscanf(cmd, "%f %f", &pan, &tilt) == 2) {
-    target_angle_bottom = pan;
-    target_angle_top = tilt;
+    target_angle_bottom = checkBounds(0, pan);
+    target_angle_top = checkBounds(1, tilt);
   } else {
     Serial.println("Usage: M<pan> <tilt>  (e.g., M1.57 0.5)");
   }
