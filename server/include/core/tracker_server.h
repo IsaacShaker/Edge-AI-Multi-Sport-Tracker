@@ -6,6 +6,7 @@
 #include "../factories/vision_factory.h"
 #include "../factories/estimator_factory.h"
 #include "../factories/motor_factory.h"
+#include "../streaming/stream_server.h"
 #include <memory>
 #include <thread>
 #include <atomic>
@@ -128,6 +129,9 @@ private:
     EstimatedState last_prediction_;   // Previous frame's prediction for comparison
     bool has_last_prediction_;         // Whether we have a previous prediction to compare
     int frame_count_;                  // Frame counter for logging
+
+    // Web streaming
+    std::unique_ptr<StreamServer> stream_server_;
     
     /**
      * @brief Main tracking loop (runs in separate thread)

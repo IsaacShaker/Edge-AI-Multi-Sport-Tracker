@@ -76,7 +76,17 @@ bool TrackerServer::initialize(const ServerConfig& config) {
     } else {
         std::cerr << "Warning: Could not open prediction log file" << std::endl;
     }
-    
+
+    // Start web streaming server if enabled
+    if (config_.enable_web_streaming) {
+        stream_server_ = std::make_unique<StreamServer>();
+        if (!stream_server_->start(config_.web_port)) {
+            std::cerr << "Warning: Failed to start stream server on port "
+                      << config_.web_port << std::endl;
+            stream_server_.reset();
+        }
+    }
+
     std::cout << "=== Tracker Server Initialized ===" << std::endl;
     return true;
 }
@@ -106,10 +116,14 @@ void TrackerServer::stop() {
         tracker_thread_.join();
     }
     
+    if (stream_server_) {
+        stream_server_->stop();
+    }
+
     if (motor_) {
         motor_->disconnect();
     }
-    
+
     std::cout << "Tracker server stopped" << std::endl;
 }
 
@@ -167,25 +181,27 @@ void TrackerServer::trackerLoop() {
             continue;
         }
         
-        // Process frame
-        if (config_.enable_visualization) {
+        // Process frame — run full visualization pipeline when either the local
+        // display or the web stream is active (both need the annotated frame).
+        if (config_.enable_visualization || config_.enable_web_streaming) {
             processFrameWithVisualization(frame);
-            
-            // Display frame
-            try {
-                cv::imshow("Edge AI Multi-Sport Tracker", frame);
-                if (cv::waitKey(1) == 'q') {
-                    running_ = false;
+
+            if (config_.enable_visualization) {
+                try {
+                    cv::imshow("Edge AI Multi-Sport Tracker", frame);
+                    if (cv::waitKey(1) == 'q') {
+                        running_ = false;
+                    }
+                } catch (cv::Exception& e) {
+                    std::cerr << "\n\nERROR: Cannot display window!" << std::endl;
+                    std::cerr << "Details: " << e.what() << std::endl;
+                    std::cerr << "\nDisabling visualization. Tracker will continue without display." << std::endl;
+                    std::cerr << "\nPossible solutions:" << std::endl;
+                    std::cerr << "  1. Set QT_QPA_PLATFORM=xcb (for XWayland compatibility)" << std::endl;
+                    std::cerr << "  2. Verify Qt5 libraries are installed: qtbase5-dev qtwayland5" << std::endl;
+                    std::cerr << "  3. Use --no-viz flag to run without display\n" << std::endl;
+                    config_.enable_visualization = false;
                 }
-            } catch (cv::Exception& e) {
-                std::cerr << "\n\nERROR: Cannot display window!" << std::endl;
-                std::cerr << "Details: " << e.what() << std::endl;
-                std::cerr << "\nDisabling visualization. Tracker will continue without display." << std::endl;
-                std::cerr << "\nPossible solutions:" << std::endl;
-                std::cerr << "  1. Set QT_QPA_PLATFORM=xcb (for XWayland compatibility)" << std::endl;
-                std::cerr << "  2. Verify Qt5 libraries are installed: qtbase5-dev qtwayland5" << std::endl;
-                std::cerr << "  3. Use --no-viz flag to run without display\n" << std::endl;
-                config_.enable_visualization = false;  // Disable to avoid repeated errors
             }
         } else {
             processFrame(frame.data, frame.cols, frame.rows);
@@ -447,11 +463,11 @@ process_detection:
 void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
     // Run core detection and tracking logic
     auto result = detectAndTrack(frame);
-    
+
     // Send motor commands using Kalman-filtered current state
-    // This is already the optimal blend of prediction + measurement
+    GimbalAngles angles{0.0f, 0.0f};
     if (result.has_state) {
-        auto angles = computeGimbalAngles(result.current_state);
+        angles = computeGimbalAngles(result.current_state);
         motor_->setTargetAngles(angles);
     }
     
@@ -574,6 +590,33 @@ void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
     cv::putText(frame, "Green: Detection | Blue: Kalman Filtered (Gimbal Aim) | Red: Expected Future", 
                cv::Point(10, frame.rows - 10),
                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
+
+    // Push annotated frame + telemetry to web stream if enabled
+    if (stream_server_ && config_.enable_web_streaming) {
+        TelemetryData telem;
+        {
+            std::lock_guard<std::mutex> lock(stats_mutex_);
+            telem.fps         = stats_.fps;
+            telem.frame_count = stats_.frames_processed;
+        }
+        telem.has_detection = result.has_detection;
+        if (result.has_detection) {
+            telem.confidence = result.detection.confidence;
+        }
+        if (result.has_state) {
+            telem.pos_x = result.current_state.position.x;
+            telem.pos_y = result.current_state.position.y;
+            telem.vel_x = result.current_state.velocity.vx;
+            telem.vel_y = result.current_state.velocity.vy;
+        }
+        telem.pan_deg  = angles.pan  * (180.0f / static_cast<float>(M_PI));
+        telem.tilt_deg = angles.tilt * (180.0f / static_cast<float>(M_PI));
+        telem.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+
+        stream_server_->pushFrame(frame);
+        stream_server_->pushTelemetry(telem);
+    }
 }
 
 } // namespace tracker

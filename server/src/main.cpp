@@ -30,6 +30,8 @@ void printUsage() {
     std::cout << "  --camera <id>         Camera device ID (default: 0)" << std::endl;
     std::cout << "  --no-viz              Disable visualization" << std::endl;
     std::cout << "  --no-roi              Disable ROI optimization (always use full frame)" << std::endl;
+    std::cout << "  --web-stream          Enable web streaming dashboard (default: disabled)" << std::endl;
+    std::cout << "  --port <port>         Web streaming port (default: 8080)" << std::endl;
     std::cout << "  --help                Show this help message" << std::endl;
 }
 
@@ -90,6 +92,12 @@ int main(int argc, char** argv) {
         else if (arg == "--no-roi") {
             enable_roi = false;
         }
+        else if (arg == "--web-stream") {
+            config.enable_web_streaming = true;
+        }
+        else if (arg == "--port" && i + 1 < argc) {
+            config.web_port = std::stoi(argv[++i]);
+        }
         else {
             std::cerr << "Unknown option: " << arg << std::endl;
             printUsage();
@@ -104,6 +112,9 @@ int main(int argc, char** argv) {
     std::cout << "Motor:     " << config.motor.controller_type << std::endl;
     std::cout << "Camera:    " << config.camera_source << std::endl;
     std::cout << "ROI:       " << (enable_roi ? "Enabled" : "Disabled") << std::endl;
+    if (config.enable_web_streaming) {
+        std::cout << "Streaming: http://0.0.0.0:" << config.web_port << std::endl;
+    }
     std::cout << "=====================\n" << std::endl;
     
     // Create and initialize server

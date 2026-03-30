@@ -51,6 +51,23 @@ set(STREAMING_SOURCES
     src/streaming/mjpeg_streamer.cpp
 )
 
+# ── Embed web/index.html into a generated C++ header ─────────────────────────
+set(WEB_DASHBOARD_HTML  "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html")
+set(WEB_DASHBOARD_HDR   "${CMAKE_CURRENT_BINARY_DIR}/include/web_dashboard.h")
+
+add_custom_command(
+    OUTPUT  "${WEB_DASHBOARD_HDR}"
+    COMMAND ${CMAKE_COMMAND}
+            -DINPUT="${WEB_DASHBOARD_HTML}"
+            -DOUTPUT="${WEB_DASHBOARD_HDR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_html.cmake"
+    DEPENDS "${WEB_DASHBOARD_HTML}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_html.cmake"
+    COMMENT "Embedding web/index.html → ${WEB_DASHBOARD_HDR}"
+)
+
+add_custom_target(web_dashboard DEPENDS "${WEB_DASHBOARD_HDR}")
+
 set(FACTORY_SOURCES
     src/factories/vision_factory.cpp
     src/factories/estimator_factory.cpp
@@ -73,7 +90,9 @@ add_library(motor STATIC ${MOTOR_SOURCES})
 target_link_libraries(motor Threads::Threads)
 
 add_library(streaming STATIC ${STREAMING_SOURCES})
+target_include_directories(streaming PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/include)
 target_link_libraries(streaming Threads::Threads ${OpenCV_LIBS})
+add_dependencies(streaming web_dashboard)
 
 add_library(factories STATIC ${FACTORY_SOURCES})
 target_link_libraries(factories vision estimation motor)

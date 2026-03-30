@@ -21,6 +21,9 @@
 #   --height H         Capture height in pixels     (default: 720)
 #   --fps F            Target frames per second      (default: 30)
 #   --display          Enable display window (requires monitor / X11)
+#   --no-viz           Disable display (headless mode)
+#   --web-stream       Enable web dashboard on port 8080
+#   --port P           Web streaming port           (default: 8080)
 #   --help             Show this message
 
 set -e
@@ -31,12 +34,14 @@ BUILD_DIR="$SCRIPT_DIR/server/build"
 EXECUTABLE="$BUILD_DIR/bin/tracker_server"
 
 ESTIMATOR="imm"
-MOTOR="simplefoc"
+MOTOR="mock"
 SERIAL_PORT="/dev/ttyACM0"
 CAP_WIDTH=1280
 CAP_HEIGHT=720
 CAP_FPS=30
 DISPLAY_ENABLED=true    # display enabled by default
+WEB_STREAM=false
+WEB_PORT=8080
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -48,6 +53,9 @@ while [[ $# -gt 0 ]]; do
         --height)     CAP_HEIGHT="$2"; shift 2 ;;
         --fps)        CAP_FPS="$2";    shift 2 ;;
         --display)    DISPLAY_ENABLED=true; shift ;;
+        --no-viz)     DISPLAY_ENABLED=false; shift ;;
+        --web-stream) WEB_STREAM=true; shift ;;
+        --port)       WEB_PORT="$2"; shift 2 ;;
         --help)
             grep '^#' "$0" | grep -v '!/bin' | sed 's/^# \{0,1\}//'
             exit 0
@@ -98,6 +106,12 @@ if [ "$DISPLAY_ENABLED" = false ]; then
     VIZ_FLAG="--no-viz"
 fi
 
+# ── Web stream flag ───────────────────────────────────────────────────────────
+STREAM_FLAGS=""
+if [ "$WEB_STREAM" = true ]; then
+    STREAM_FLAGS="--web-stream --port $WEB_PORT"
+fi
+
 # ── Environment ───────────────────────────────────────────────────────────────
 if [ "$DISPLAY_ENABLED" = false ]; then
     export DISPLAY=""
@@ -120,6 +134,10 @@ echo "    Motor     : $MOTOR$([ "$MOTOR" = "simplefoc" ] && echo " ($SERIAL_PORT
 echo "    Camera    : libcamerasrc + queue (Arducam IMX519)"
 echo "    Resolution: ${CAP_WIDTH}x${CAP_HEIGHT} @ ${CAP_FPS} fps"
 echo "    Display   : $([ "$DISPLAY_ENABLED" = true ] && echo "enabled" || echo "disabled (headless)")"
+if [ "$WEB_STREAM" = true ]; then
+    PI_IP=$(hostname -I | awk '{print $1}')
+    echo "    Web UI    : http://${PI_IP}:${WEB_PORT}"
+fi
 echo ""
 
 cd "$BUILD_DIR"
@@ -130,4 +148,5 @@ cd "$BUILD_DIR"
     --motor       "$MOTOR" \
     --serial-port "$SERIAL_PORT" \
     --camera      "$PIPELINE" \
-    $VIZ_FLAG
+    $VIZ_FLAG \
+    $STREAM_FLAGS
