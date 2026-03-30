@@ -31,6 +31,16 @@ void MockController::disconnect() {
     status_.is_connected = false;
 }
 
+bool MockController::enableMotors() {
+    std::cout << "[MockController] Enabling Motors..." << std::endl;
+    return true;
+}   
+
+bool MockController::disableMotors() {
+    std::cout << "[MockController] Disabling Motors..." << std::endl;
+    return true;
+}
+
 bool MockController::setTargetAngles(const GimbalAngles& angles) {
     if (!connected_) {
         status_.error_message = "Not connected";

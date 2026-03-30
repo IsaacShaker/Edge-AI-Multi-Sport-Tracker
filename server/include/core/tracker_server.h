@@ -26,14 +26,16 @@ struct ServerConfig : public Config {
     MotorConfig motor;
     
     // Server parameters
-    int camera_device_id;
+    // Accepts either an integer device index ("0", "1") or a full
+    // GStreamer pipeline string (used for libcamera on Raspberry Pi).
+    std::string camera_source;
     float target_fps;
     bool enable_visualization;
     bool enable_web_streaming;
     int web_port;
     
     ServerConfig()
-        : camera_device_id(0),
+        : camera_source("0"),
           target_fps(30.0f),
           enable_visualization(true),
           enable_web_streaming(false),

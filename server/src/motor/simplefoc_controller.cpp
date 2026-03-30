@@ -47,6 +47,11 @@ bool SimpleFOCController::connect() {
     status_.is_connected = true;
     
     std::cout << "[SimpleFOCController] Connected" << std::endl;
+
+    if (!enableMotors()) {
+        std::cerr << "[SimpleFOCController] Warning: failed to enable motors" << std::endl;
+    }
+
     return true;
 }
 
@@ -57,11 +62,30 @@ void SimpleFOCController::disconnect() {
         return;
     }
     
+    disableMotors();
     closeSerial();
     connected_ = false;
     status_.is_connected = false;
     
     std::cout << "[SimpleFOCController] Disconnected" << std::endl;
+}
+
+bool SimpleFOCController::enableMotors() {
+    if (!connected_) {
+        status_.error_message = "Not connected";
+        return false;
+    }
+
+    return sendCommand("K1");
+}
+
+bool SimpleFOCController::disableMotors() {
+    if (!connected_) {
+        status_.error_message = "Not connected";
+        return false;
+    }
+
+    return sendCommand("K0");
 }
 
 bool SimpleFOCController::setTargetAngles(const GimbalAngles& angles) {

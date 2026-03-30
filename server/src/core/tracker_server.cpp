@@ -4,6 +4,7 @@
 #include "../include/factories/motor_factory.h"
 #include <iostream>
 #include <fstream>
+#include <algorithm>
 #include <cmath>
 #include <opencv2/opencv.hpp>
 
@@ -118,17 +119,36 @@ TrackerServer::Stats TrackerServer::getStats() const {
 }
 
 void TrackerServer::trackerLoop() {
-    // Open camera
-    cv::VideoCapture cap(config_.camera_device_id);
+    // Open camera.
+    // If camera_source is a plain integer string ("0", "1", ...) open by
+    // V4L2 index.  Otherwise treat it as a GStreamer pipeline string, which
+    // is the correct approach for Raspberry Pi 5 with libcamera/Arducam.
+    cv::VideoCapture cap;
+    const std::string& src = config_.camera_source;
+    bool isIndex = !src.empty() &&
+        std::all_of(src.begin(), src.end(), ::isdigit);
+    if (isIndex) {
+        cap.open(std::stoi(src));
+    } else {
+        cap.open(src, cv::CAP_GSTREAMER);
+    }
     if (!cap.isOpened()) {
-        std::cerr << "Failed to open camera " << config_.camera_device_id << std::endl;
+        std::cerr << "Failed to open camera: " << src << std::endl;
+        std::cerr << "  Integer index: try 0, 1, 2..." << std::endl;
+        std::cerr << "  GStreamer pipeline: ensure OpenCV was built with GStreamer support" << std::endl;
         running_ = false;
         return;
     }
-    
-    cap.set(cv::CAP_PROP_FRAME_WIDTH, config_.vision.input_width);
-    cap.set(cv::CAP_PROP_FRAME_HEIGHT, config_.vision.input_height);
-    cap.set(cv::CAP_PROP_FPS, config_.target_fps);
+
+    // Only apply cap.set() for plain device indices.
+    // For GStreamer pipelines the format/resolution/fps are already baked into
+    // the pipeline string — calling cap.set() on a GStreamer backend triggers
+    // an internal pipeline restart that kills libcamerasrc on RPi5/PiSP.
+    if (isIndex) {
+        cap.set(cv::CAP_PROP_FRAME_WIDTH,  config_.vision.input_width);
+        cap.set(cv::CAP_PROP_FRAME_HEIGHT, config_.vision.input_height);
+        cap.set(cv::CAP_PROP_FPS,          config_.target_fps);
+    }
     
     cv::Mat frame;
     last_frame_time_ = std::chrono::steady_clock::now();
