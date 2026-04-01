@@ -1,5 +1,7 @@
 #include <SimpleFOC.h>
 #include <EEPROM.h>
+#include <Wire.h>
+#include "definitions.h"
 #include "gimbal_settings.h"
 #include "power_telemetry.h"
 
@@ -15,32 +17,47 @@ MagneticSensorI2C sensorTop = MagneticSensorI2C(AS5600_I2C);
 //---------------------------------------
 
 // --- Bottom Motor (Pan/Yaw) ---
-BLDCMotor motorBottom = BLDCMotor(7, 2.3, 220, 0.00086);
-BLDCDriver3PWM driverBottom = BLDCDriver3PWM(1, 2, 3, 0);  // PWM pins + enable
+BLDCMotor motorBottom = BLDCMotor(POLE_PAIRS, PHASE_RESISTANCE, KV_RATING, Q_INDUCTANCE);
+BLDCDriver3PWM driverBottom = BLDCDriver3PWM(B_PH1, B_PH2, B_PH3, B_EN);  // PWM pins + enable
 
 // --- Top Motor (Tilt/Pitch) ---
-BLDCMotor motorTop = BLDCMotor(7, 2.3, 220, 0.00086);
-BLDCDriver3PWM driverTop = BLDCDriver3PWM(6,7,8,5);  // PWM pins + enable
+BLDCMotor motorTop = BLDCMotor(POLE_PAIRS, PHASE_RESISTANCE, KV_RATING, Q_INDUCTANCE);
+BLDCDriver3PWM driverTop = BLDCDriver3PWM(T_PH1, T_PH2 , T_PH3, T_EN);  // PWM pins + enable
 
 //---------------------------------------
 //    CONTROL VARIABLES
 //---------------------------------------
 
+//Motor Movement Limits
 float target_angle_bottom = 0;  // pan/yaw target (radians)
 float target_angle_top = 0;     // tilt/pitch target (radians)
 
-//ADJUST HARD LIMITS IF NEEDED
 float target_angle_bottom_min = 1.5; // pan/yaw target angle minimum
 float target_angle_bottom_max = 3.5; // pan/yaw target angle maximum
 float target_angle_top_min = -5.0; // tilt/pitch target angle minimum
 float target_angle_top_max = -3.0; // tilt/pitch target angle maximum
 
-float home_angle_bottom = 0;  // pan/yaw target (radians)
-float home_angle_top = 0;     // tilt/pitch target (radians)
+float home_angle_bottom = 0;  // pan/yaw target (radians) defualt
+float home_angle_top = 0;     // tilt/pitch target (radians) default
 
+//Positional Telemetry
 bool returnPosition = false; //Position Logging (Serial)
 unsigned long last_time = 0;
 uint32_t counter = 0;
+
+//Power Telemetry
+bool checkPower = false; //Enable power telemetry and firmware-level safety.
+float rail_12V = 0;
+float rail_5V = 0;
+float rail_3V = 0;
+float b_phase1_V = 0;
+float t_phase1_V = 0;
+float b_phase2_V = 0;
+float t_phase2_V = 0;
+float b_phase3_V = 0;
+float t_phase3_V = 0;
+
+
 
 
 
@@ -53,6 +70,12 @@ Settings settings;  //Instatiate the gimbal settings.
 //    COMMANDER (Serial Interface)
 //---------------------------------------
 Commander command = Commander(Serial);
+
+
+
+/**
+ * MOTOR MOVEMENT COMMANDS
+ */
 
 float checkBounds(int motor, float angle_in){
   if(motor == 0){
@@ -122,6 +145,54 @@ void homeMotors(char* cmd) {
   target_angle_bottom = settings.bottom_home;
 }
 
+void lock_motors(char* cmd){
+  float enableMotor;
+  if (sscanf(cmd, "%f", &enableMotor) == 1){
+    if(enableMotor){
+      motorBottom.enable();
+      motorTop.enable();
+      Serial.println("Motors Enabled");
+    }
+    else{
+      motorTop.disable();
+      motorBottom.disable();
+      Serial.println("Motors Disabled");
+    }
+  }
+  else{
+    Serial.println("Usage: K <(0 for disable, 1 for enable)>");
+  }
+}
+
+
+
+/**
+ *  Settings Adjustment Commands
+ */
+
+//Set velocity of either motors in single command.
+void setVelocity(char* cmd) {
+  //Get the position in radians of the bottom and top motor encoders.
+  float velocity, motor;
+
+  //Motor = Input1, Velocity = Input2
+  if (sscanf(cmd, "%f %f", &motor, &velocity) == 2) {
+    if(motor == 1){
+      motorTop.velocity_limit = velocity;
+      Serial.print("Top Motor ");
+    }
+    else{
+      motorBottom.velocity_limit = velocity;
+      Serial.print("Bottom Motor ");
+    }
+    Serial.print("Velocity (Rad/s): "); Serial.println(velocity, 3);
+  }
+
+  else{
+    Serial.println("Usage: V <motor (0 for bottom, 1 for top)> <velocity (rad/s)>");
+  }
+}
+
 void bSetPID(char* cmd) {
   //parse three floats from cmd, map to P, I, D.
   float bP, bI, bD;
@@ -161,29 +232,6 @@ void tSetPID(char* cmd) {
   }
 }
 
-//Set velocity of either motors in single command.
-void setVelocity(char* cmd) {
-  //Get the position in radians of the bottom and top motor encoders.
-  float velocity, motor;
-
-  //Motor = Input1, Velocity = Input2
-  if (sscanf(cmd, "%f %f", &motor, &velocity) == 2) {
-    if(motor == 1){
-      motorTop.velocity_limit = velocity;
-      Serial.print("Top Motor ");
-    }
-    else{
-      motorBottom.velocity_limit = velocity;
-      Serial.print("Bottom Motor ");
-    }
-    Serial.print("Velocity (Rad/s): "); Serial.println(velocity, 3);
-  }
-
-  else{
-    Serial.println("Usage: V <motor (0 for bottom, 1 for top)> <velocity (rad/s)>");
-  }
-}
-
 //Set LPF of either motors in single command.
 void setLPF(char* cmd) {
   //Get the position in radians of the bottom and top motor encoders.
@@ -206,7 +254,6 @@ void setLPF(char* cmd) {
     Serial.println("Usage: L <motor (0 for bottom, 1 for top)> <seconds (s)>");
   }
 }
-
 
 void getInfo(char* cmd) {
   Serial.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
@@ -252,44 +299,6 @@ void getInfo(char* cmd) {
 
   Serial.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 
-}
-
-void lock_motors(char* cmd){
-  float enableMotor;
-  if (sscanf(cmd, "%f", &enableMotor) == 1){
-    if(enableMotor){
-      motorBottom.enable();
-      motorTop.enable();
-      Serial.println("Motors Enabled");
-    }
-    else{
-      motorTop.disable();
-      motorBottom.disable();
-      Serial.println("Motors Disabled");
-    }
-  }
-  else{
-    Serial.println("Usage: K <(0 for disable, 1 for enable)>");
-  }
-}
-
-void recordData(char* cmd){
-  float recordData;
-  if (sscanf(cmd, "%f", &recordData) == 1){
-    if(recordData){ 
-      returnPosition = true;
-      last_time = 0;
-      counter = 0;
-      Serial.println("time_ms,top_angle,bottom_angle");
-
-    }
-    else{
-      returnPosition = false;
-    }
-  }
-  else{
-    Serial.println("Usage: I <(0 for disable, 1 for enable)>");
-  }
 }
 
 void saveSettings(char* cmd){
@@ -343,6 +352,35 @@ void saveSettings(char* cmd){
 
 
 
+/**
+ * Telemetry
+ */
+
+void recordData(char* cmd){
+  float recordData;
+  if (sscanf(cmd, "%f", &recordData) == 1){
+    if(recordData){ 
+      returnPosition = true;
+      last_time = 0;
+      counter = 0;
+      Serial.println("time_ms,top_angle,bottom_angle");
+
+    }
+    else{
+      returnPosition = false;
+    }
+  }
+  else{
+    Serial.println("Usage: I <(0 for disable, 1 for enable)>");
+  }
+}
+
+void powerCheck(){
+  return;
+}
+
+
+
 
 //---------------------------------------
 //    SETUP
@@ -354,13 +392,26 @@ void setup() {
   Serial.println(F("=== 2D Gimbal Initializing ==="));
 
   // -------------------------------------------------
-  // Initialize sensors
+  // Initialize sensors - COMMENT OUT CODE BLOCKS
   // -------------------------------------------------
+
+  //STM32F4 SETUP
+  // TwoWire BottomWire(PB7, PB6); //Bottom SDA / SCL
+  // TwoWire TopWire(PB9, PB8); //Top SDA / SCL
+
+  // Serial.println(F("Init bottom sensor (Wire / SDA0)..."));
+  // sensorBottom.init(&BottomWire);   // I2C bus 0 (SDA0/SCL0)
+
+  // Serial.println(F("Init top sensor (Wire1 / SDA1)..."));
+  // sensorTop.init(&TopWire);     // I2C bus 1 (SDA1/SCL1)
+
+  //Teensy 4.1 SETUP
   Serial.println(F("Init bottom sensor (Wire / SDA0)..."));
   sensorBottom.init(&Wire);   // I2C bus 0 (SDA0/SCL0)
 
   Serial.println(F("Init top sensor (Wire1 / SDA1)..."));
   sensorTop.init(&Wire1);     // I2C bus 1 (SDA1/SCL1)
+
 
 
   // -------------------------------------------------
