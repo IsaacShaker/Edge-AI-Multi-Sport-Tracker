@@ -149,5 +149,3 @@ PRIVATE DEFINES
 
 #endif // MY_HEADER_H
 
-
-
