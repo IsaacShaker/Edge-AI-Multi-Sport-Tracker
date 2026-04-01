@@ -1,9 +1,58 @@
+#undef HSE_VALUE
+#define HSE_VALUE 25000000U
+
 #include <SimpleFOC.h>
 #include <EEPROM.h>
 #include <Wire.h>
 #include "definitions.h"
 #include "gimbal_settings.h"
 #include "power_telemetry.h"
+
+//---------------------------------------
+//    CLOCK CONFIGURATION
+//---------------------------------------
+
+void SystemClock_Config(void)
+{
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+
+  /** Configure the main internal regulator output voltage
+  */
+  __HAL_RCC_PWR_CLK_ENABLE();
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+
+  /** Initializes the RCC Oscillators according to the specified parameters
+  * in the RCC_OscInitTypeDef structure.
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 25;
+  RCC_OscInitStruct.PLL.PLLN = 192;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 4;
+  RCC_OscInitStruct.PLL.PLLR = 2;
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
 
 //---------------------------------------
 //    SENSOR CONFIGURATION
@@ -47,19 +96,17 @@ uint32_t counter = 0;
 
 //Power Telemetry
 bool checkPower = false; //Enable power telemetry and firmware-level safety.
-float rail_12V = 0;
-float rail_5V = 0;
-float rail_3V = 0;
-float b_phase1_V = 0;
-float t_phase1_V = 0;
-float b_phase2_V = 0;
-float t_phase2_V = 0;
-float b_phase3_V = 0;
-float t_phase3_V = 0;
-
-
-
-
+float current_sys = 0;
+float voltage_sys = 0;
+float current_12V = 0;
+float current_5V = 0;
+float current_3V3 = 0;
+float current_BP1 = 0;
+float current_TP1 = 0;
+float current_BP2 = 0;
+float current_TP2 = 0;
+float current_BP3 = 0;
+float current_TP3 = 0;
 
 //---------------------------------------
 //    MEMORY SETTINGS
@@ -70,8 +117,6 @@ Settings settings;  //Instatiate the gimbal settings.
 //    COMMANDER (Serial Interface)
 //---------------------------------------
 Commander command = Commander(Serial);
-
-
 
 /**
  * MOTOR MOVEMENT COMMANDS
@@ -387,6 +432,7 @@ void powerCheck(){
 //---------------------------------------
 
 void setup() {
+  SystemClock_Config();
   Serial.begin(115200);
   SimpleFOCDebug::enable(&Serial);
   Serial.println(F("=== 2D Gimbal Initializing ==="));
@@ -542,6 +588,7 @@ void setup() {
 //---------------------------------------
 
 void loop() {
+
   // Run FOC for both motors
   motorBottom.loopFOC();
   motorTop.loopFOC();
@@ -550,7 +597,7 @@ void loop() {
   motorBottom.move(target_angle_bottom);
   motorTop.move(target_angle_top);
 
-  //return positional telemetry (if enabled) in CSV format.
+  // Return positional telemetry (if enabled) in CSV format.
   if(returnPosition){
     if (millis() - last_time >= 10) {
       last_time += 10;
@@ -565,6 +612,31 @@ void loop() {
     }
   }
 
+
+  //ANTHONY'S SHIT
+  
+  // Calculate power telemetry
+  current_sys = 
+  // Return power telemetry
+
+
   // Serial command processing
   command.run();
 }
+
+/**
+ *
+bool checkPower = false; //Enable power telemetry and firmware-level safety.
+float current_sys = 0;
+float voltage_sys = 0;
+float current_12V = 0;
+float current_5V = 0;
+float current_3V3 = 0;
+float current_BP1 = 0;
+float current_TP1 = 0;
+float current_BP2 = 0;
+float current_TP2 = 0;
+float current_BP3 = 0;
+float current_TP3 = 0;
+
+ */
