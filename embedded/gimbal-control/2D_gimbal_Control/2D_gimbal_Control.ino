@@ -614,10 +614,33 @@ void loop() {
 
 
   //ANTHONY'S SHIT
-  
-  // Calculate power telemetry
-  current_sys = 
-  // Return power telemetry
+  pinMode()
+  digitalWrite()
+  digitalRead()
+
+  //ADC
+  current_sys = systemCurrent(digitalRead(PA1));
+  voltage_sys = systemVoltage(digitalRead(PA0));
+  power_sys = current_sys * voltage_sys
+  current_3V3 = currentSense(digitalRead(PC2), 0.0015);
+  current_5V = currentSense(digitalRead(PC0), 0.0015);
+  current_12V = currentSense(digitalRead(PC1), 0.0015);
+  current_BP1 = currentSense(digitalRead(PA4), 0.0100);
+  current_TP1 = currentSense(digitalRead(PC5), 0.0100);
+  current_BP2 = currentSense(digitalRead(PA5), 0.0100);
+  current_TP2 = currentSense(digitalRead(PC4), 0.0100);
+  current_BP3 = currentSense(digitalRead(PA6), 0.0100);
+  current_TP3 = currentSense(digitalRead(PC3), 0.0100);
+
+  //Inputs
+
+  //Outputs
+
+  //I2C
+
+  //UART
+
+  //USB
 
 
   // Serial command processing
@@ -638,5 +661,4 @@ float current_BP2 = 0;
 float current_TP2 = 0;
 float current_BP3 = 0;
 float current_TP3 = 0;
-
  */
