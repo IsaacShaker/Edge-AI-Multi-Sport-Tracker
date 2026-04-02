@@ -34,7 +34,7 @@ BUILD_DIR="$SCRIPT_DIR/server/build"
 EXECUTABLE="$BUILD_DIR/bin/tracker_server"
 
 ESTIMATOR="imm"
-MOTOR="mock"
+MOTOR="simplefoc"
 SERIAL_PORT="/dev/ttyACM0"
 CAP_WIDTH=1280
 CAP_HEIGHT=720

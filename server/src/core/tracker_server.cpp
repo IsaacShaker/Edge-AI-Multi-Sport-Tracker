@@ -16,7 +16,9 @@ TrackerServer::TrackerServer()
       use_roi_(false),
       last_detection_size_(100.0f),
       has_last_prediction_(false),
-      frame_count_(0) {  // Initial guess for object size
+      frame_count_(0),
+      current_pan_rad_(0.0f),
+      current_tilt_rad_(0.0f) {
     stats_.fps = 0.0f;
     stats_.frames_processed = 0;
     stats_.detections_count = 0;
@@ -241,23 +243,45 @@ void TrackerServer::processFrame(const void* frame_data, int width, int height) 
 }
 
 GimbalAngles TrackerServer::computeGimbalAngles(const EstimatedState& state) {
-    // Simple proportional control
-    // Map pixel position to gimbal angles
-    
-    // Assuming (0,0) is center of frame
-    // Positive X = right, positive Y = down
-    
-    // Map X position to pan angle
-    float frame_center_x = config_.vision.input_width / 2.0f;
-    float x_error = state.position.x - frame_center_x;
-    float pan_angle = (x_error / frame_center_x) * 1.0f;  // Max 1 radian
-    
-    // Map Y position to tilt angle
-    float frame_center_y = config_.vision.input_height / 2.0f;
-    float y_error = state.position.y - frame_center_y;
-    float tilt_angle = -(y_error / frame_center_y) * 0.5f;  // Max 0.5 radian
-    
-    return GimbalAngles(pan_angle, tilt_angle);
+    // Incremental visual servoing — each frame we nudge the accumulated gimbal
+    // angle by a small amount proportional to the pixel error.  This avoids the
+    // oscillation caused by mapping raw pixel position to a new absolute angle
+    // every frame (which creates a closed-loop instability at 30 Hz).
+    //
+    // Tuning knobs:
+    //   GAIN_PAN / GAIN_TILT  — radians per normalised-error per frame.
+    //                           Start small; increase for faster tracking.
+    //   DEAD_ZONE             — fractional half-width (0..1) of the "still" zone.
+    //                           Prevents jitter from detector noise near centre.
+
+    static constexpr float GAIN_PAN   = 0.015f;  // ~0.86 deg per frame at full error
+    static constexpr float GAIN_TILT  = 0.010f;
+    static constexpr float DEAD_ZONE  = 0.04f;   // 4% of half-frame — ~26 px at 1280
+
+    // Limits (radians) — clamp accumulated state to keep gimbal in safe range
+    static constexpr float PAN_MAX    =  1.57f;  // ±90°
+    static constexpr float TILT_MAX   =  0.79f;  // ±45°
+
+    float frame_half_x = config_.vision.input_width  / 2.0f;
+    float frame_half_y = config_.vision.input_height / 2.0f;
+
+    // Normalised error: -1 (full left/up) .. +1 (full right/down)
+    float norm_x =  (state.position.x - frame_half_x) / frame_half_x;
+    float norm_y =  (state.position.y - frame_half_y) / frame_half_y;
+
+    // Apply dead zone
+    if (std::abs(norm_x) < DEAD_ZONE) norm_x = 0.0f;
+    if (std::abs(norm_y) < DEAD_ZONE) norm_y = 0.0f;
+
+    // Accumulate
+    current_pan_rad_  += GAIN_PAN  * norm_x;
+    current_tilt_rad_ -= GAIN_TILT * norm_y;  // camera Y+ is down; tilt+ is up
+
+    // Clamp to safe range
+    current_pan_rad_  = std::max(-PAN_MAX,  std::min(PAN_MAX,  current_pan_rad_));
+    current_tilt_rad_ = std::max(-TILT_MAX, std::min(TILT_MAX, current_tilt_rad_));
+
+    return GimbalAngles(current_pan_rad_, current_tilt_rad_);
 }
 
 void TrackerServer::updateSearchROI(const EstimatedState& state, int frame_width, int frame_height) {

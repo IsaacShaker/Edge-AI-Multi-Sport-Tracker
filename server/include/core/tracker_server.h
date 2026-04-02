@@ -125,10 +125,14 @@ private:
     float last_detection_size_;        // Size of last successful detection
     
     // Prediction Error Logging
-    std::ofstream prediction_log_;     // CSV log file for prediction analysis
-    EstimatedState last_prediction_;   // Previous frame's prediction for comparison
-    bool has_last_prediction_;         // Whether we have a previous prediction to compare
-    int frame_count_;                  // Frame counter for logging
+    std::ofstream prediction_log_;
+    EstimatedState last_prediction_;
+    bool has_last_prediction_;
+    int frame_count_;
+
+    // Incremental gimbal state — accumulated absolute target sent to firmware
+    float current_pan_rad_;
+    float current_tilt_rad_;
 
     // Web streaming
     std::unique_ptr<StreamServer> stream_server_;

@@ -158,6 +158,23 @@ void getPos(char* cmd) {
   Serial.print(" | Bottom Position (Rads): "); Serial.print(bottomPos, 3);
 }
 
+// K1 = enable (hold current position)
+// K0 = disable (motors go limp)
+void doEnableDisable(char* cmd) {
+  if (cmd[0] == '1') {
+    motorBottom.enable();
+    motorTop.enable();
+    // Hold whatever position the axes are currently at
+    target_angle_bottom = motorBottom.shaftAngle();
+    target_angle_top    = motorTop.shaftAngle();
+    Serial.println(F("Motors enabled"));
+  } else {
+    motorBottom.disable();
+    motorTop.disable();
+    Serial.println(F("Motors disabled"));
+  }
+}
+
 // =====================================================
 // SETUP
 // =====================================================
@@ -249,13 +266,17 @@ void setup() {
   command.add('P', tSetPID, "Top: Y<P> <I> <D>");
   command.add('X', getPos, "X: <Top (rad/s)> <Bottom (rad/s)>");
   command.add('V', setVelocity, "Usage: V <motor (0 for bottom, 1 for top)> <velocity (rad/s)>");
+  command.add('K', doEnableDisable, "K1=enable (hold pos), K0=disable (limp)");
 
   Serial.println(F("=== 2D Gimbal Ready ==="));
   Serial.println(F("Commands:"));
   Serial.println(F("  B<angle>        - set pan/bottom angle (rad)"));
   Serial.println(F("  T<angle>        - set tilt/top angle (rad)"));
   Serial.println(F("  M<pan> <tilt>   - set both angles"));
+  Serial.println(F("  K1 / K0         - enable / disable motors"));
   Serial.println(F("  Example: B1.57  T0.5  M1.57 0.5"));
+  // Sentinel that the Pi waits for before sending any commands
+  Serial.println(F("READY"));
   _delay(1000);
   target_angle_bottom = motorBottom.shaftAngle();
   target_angle_top = motorTop.shaftAngle();

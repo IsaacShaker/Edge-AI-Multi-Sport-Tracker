@@ -4,7 +4,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <termios.h>
+#include <sys/ioctl.h>
 #include <cstring>
+#include <thread>
+#include <chrono>
 
 namespace tracker {
 
@@ -29,24 +32,69 @@ bool SimpleFOCController::initialize(const Config& config) {
 }
 
 bool SimpleFOCController::connect() {
-    std::lock_guard<std::mutex> lock(serial_mutex_);
-    
-    if (connected_) {
-        return true;
-    }
-    
-    std::cout << "[SimpleFOCController] Connecting to " << config_.serial_port 
-              << " at " << config_.baudrate << " baud..." << std::endl;
-    
-    if (!openSerial()) {
-        std::cerr << "[SimpleFOCController] Failed to open serial port" << std::endl;
-        return false;
-    }
-    
-    connected_ = true;
-    status_.is_connected = true;
-    
+    {
+        std::lock_guard<std::mutex> lock(serial_mutex_);
+
+        if (connected_) {
+            return true;
+        }
+
+        std::cout << "[SimpleFOCController] Connecting to " << config_.serial_port
+                  << " at " << config_.baudrate << " baud..." << std::endl;
+
+        if (!openSerial()) {
+            std::cerr << "[SimpleFOCController] Failed to open serial port" << std::endl;
+            return false;
+        }
+
+        connected_ = true;
+        status_.is_connected = true;
+    } // serial_mutex_ released before enableMotors() to avoid deadlock
+
     std::cout << "[SimpleFOCController] Connected" << std::endl;
+
+    // Wait for the firmware to finish setup() + initFOC() for both motors.
+    // initFOC() moves each motor through a calibration sequence and can take
+    // 2-4 seconds total. We read from the serial port and wait for the "READY"
+    // line the firmware prints when setup() is fully complete.
+    // Fall back to a 5-second hard timeout if the sentinel never arrives.
+    std::cout << "[SimpleFOCController] Waiting for firmware READY..." << std::endl;
+    {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+        char buf[256] = {};
+        int  pos = 0;
+        bool ready = false;
+
+        // Put fd into blocking reads with a short timeout so we can check
+        // the deadline without spinning 100% CPU.
+        struct termios tty;
+        tcgetattr(serial_fd_, &tty);
+        tty.c_cc[VMIN]  = 0;
+        tty.c_cc[VTIME] = 2;  // 0.2 s read timeout
+        tcsetattr(serial_fd_, TCSANOW, &tty);
+
+        while (std::chrono::steady_clock::now() < deadline) {
+            char c;
+            ssize_t n = ::read(serial_fd_, &c, 1);
+            if (n <= 0) continue;
+            if (c == '\n' || c == '\r') {
+                buf[pos] = '\0';
+                if (std::string(buf).find("READY") != std::string::npos) {
+                    ready = true;
+                    break;
+                }
+                pos = 0;
+            } else if (pos < static_cast<int>(sizeof(buf)) - 1) {
+                buf[pos++] = c;
+            }
+        }
+
+        if (ready) {
+            std::cout << "[SimpleFOCController] Firmware ready." << std::endl;
+        } else {
+            std::cerr << "[SimpleFOCController] Timeout waiting for READY — firmware may still be initializing." << std::endl;
+        }
+    }
 
     if (!enableMotors()) {
         std::cerr << "[SimpleFOCController] Warning: failed to enable motors" << std::endl;
@@ -56,17 +104,19 @@ bool SimpleFOCController::connect() {
 }
 
 void SimpleFOCController::disconnect() {
-    std::lock_guard<std::mutex> lock(serial_mutex_);
-    
     if (!connected_) {
         return;
     }
-    
+
+    // Send K0 before closing — must happen while connected_ is still true
+    // and before acquiring serial_mutex_ to avoid deadlock with sendCommand().
     disableMotors();
+
+    std::lock_guard<std::mutex> lock(serial_mutex_);
     closeSerial();
     connected_ = false;
     status_.is_connected = false;
-    
+
     std::cout << "[SimpleFOCController] Disconnected" << std::endl;
 }
 
@@ -75,7 +125,7 @@ bool SimpleFOCController::enableMotors() {
         status_.error_message = "Not connected";
         return false;
     }
-
+    std::cout << "[SimpleFOCController] Enabling motors..." << std::endl;
     return sendCommand("K1");
 }
 
@@ -145,32 +195,41 @@ bool SimpleFOCController::openSerial() {
     if (serial_fd_ < 0) {
         return false;
     }
-    
+
+    // Drop DTR immediately to prevent the Teensy/Arduino from resetting when
+    // the host opens the port. Without this, the firmware resets and the K1
+    // command sent right after connect() arrives before the firmware is ready.
+    int flags = 0;
+    ioctl(serial_fd_, TIOCMGET, &flags);
+    flags &= ~TIOCM_DTR;
+    ioctl(serial_fd_, TIOCMSET, &flags);
+
     struct termios options;
     tcgetattr(serial_fd_, &options);
-    
+
     // Set baud rate
     speed_t baud = B115200;  // TODO: Map config_.baudrate to actual baud constant
     cfsetispeed(&options, baud);
     cfsetospeed(&options, baud);
-    
+
     // 8N1
     options.c_cflag &= ~PARENB;
     options.c_cflag &= ~CSTOPB;
     options.c_cflag &= ~CSIZE;
     options.c_cflag |= CS8;
-    
+
     // No flow control
     options.c_cflag &= ~CRTSCTS;
     options.c_cflag |= CREAD | CLOCAL;
     options.c_iflag &= ~(IXON | IXOFF | IXANY);
-    
+
     // Raw mode
     options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
     options.c_oflag &= ~OPOST;
-    
+
     tcsetattr(serial_fd_, TCSANOW, &options);
-    
+    tcflush(serial_fd_, TCIOFLUSH);  // discard any buffered garbage
+
     return true;
 #else
     // TODO: Windows implementation
