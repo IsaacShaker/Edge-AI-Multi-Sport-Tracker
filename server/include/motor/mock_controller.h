@@ -19,6 +19,8 @@ public:
     bool initialize(const Config& config) override;
     bool connect() override;
     void disconnect() override;
+    bool enableMotors() override;
+    bool disableMotors() override;
     bool setTargetAngles(const GimbalAngles& angles) override;
     MotorStatus getStatus() const override;
     bool stop() override;

@@ -4,6 +4,7 @@
 #include "../include/factories/motor_factory.h"
 #include <iostream>
 #include <fstream>
+#include <algorithm>
 #include <cmath>
 #include <opencv2/opencv.hpp>
 
@@ -15,7 +16,9 @@ TrackerServer::TrackerServer()
       use_roi_(false),
       last_detection_size_(100.0f),
       has_last_prediction_(false),
-      frame_count_(0) {  // Initial guess for object size
+      frame_count_(0),
+      current_pan_rad_(0.0f),
+      current_tilt_rad_(0.0f) {
     stats_.fps = 0.0f;
     stats_.frames_processed = 0;
     stats_.detections_count = 0;
@@ -75,7 +78,17 @@ bool TrackerServer::initialize(const ServerConfig& config) {
     } else {
         std::cerr << "Warning: Could not open prediction log file" << std::endl;
     }
-    
+
+    // Start web streaming server if enabled
+    if (config_.enable_web_streaming) {
+        stream_server_ = std::make_unique<StreamServer>();
+        if (!stream_server_->start(config_.web_port)) {
+            std::cerr << "Warning: Failed to start stream server on port "
+                      << config_.web_port << std::endl;
+            stream_server_.reset();
+        }
+    }
+
     std::cout << "=== Tracker Server Initialized ===" << std::endl;
     return true;
 }
@@ -105,10 +118,14 @@ void TrackerServer::stop() {
         tracker_thread_.join();
     }
     
+    if (stream_server_) {
+        stream_server_->stop();
+    }
+
     if (motor_) {
         motor_->disconnect();
     }
-    
+
     std::cout << "Tracker server stopped" << std::endl;
 }
 
@@ -118,17 +135,36 @@ TrackerServer::Stats TrackerServer::getStats() const {
 }
 
 void TrackerServer::trackerLoop() {
-    // Open camera
-    cv::VideoCapture cap(config_.camera_device_id);
+    // Open camera.
+    // If camera_source is a plain integer string ("0", "1", ...) open by
+    // V4L2 index.  Otherwise treat it as a GStreamer pipeline string, which
+    // is the correct approach for Raspberry Pi 5 with libcamera/Arducam.
+    cv::VideoCapture cap;
+    const std::string& src = config_.camera_source;
+    bool isIndex = !src.empty() &&
+        std::all_of(src.begin(), src.end(), ::isdigit);
+    if (isIndex) {
+        cap.open(std::stoi(src));
+    } else {
+        cap.open(src, cv::CAP_GSTREAMER);
+    }
     if (!cap.isOpened()) {
-        std::cerr << "Failed to open camera " << config_.camera_device_id << std::endl;
+        std::cerr << "Failed to open camera: " << src << std::endl;
+        std::cerr << "  Integer index: try 0, 1, 2..." << std::endl;
+        std::cerr << "  GStreamer pipeline: ensure OpenCV was built with GStreamer support" << std::endl;
         running_ = false;
         return;
     }
-    
-    cap.set(cv::CAP_PROP_FRAME_WIDTH, config_.vision.input_width);
-    cap.set(cv::CAP_PROP_FRAME_HEIGHT, config_.vision.input_height);
-    cap.set(cv::CAP_PROP_FPS, config_.target_fps);
+
+    // Only apply cap.set() for plain device indices.
+    // For GStreamer pipelines the format/resolution/fps are already baked into
+    // the pipeline string — calling cap.set() on a GStreamer backend triggers
+    // an internal pipeline restart that kills libcamerasrc on RPi5/PiSP.
+    if (isIndex) {
+        cap.set(cv::CAP_PROP_FRAME_WIDTH,  config_.vision.input_width);
+        cap.set(cv::CAP_PROP_FRAME_HEIGHT, config_.vision.input_height);
+        cap.set(cv::CAP_PROP_FPS,          config_.target_fps);
+    }
     
     cv::Mat frame;
     last_frame_time_ = std::chrono::steady_clock::now();
@@ -147,25 +183,27 @@ void TrackerServer::trackerLoop() {
             continue;
         }
         
-        // Process frame
-        if (config_.enable_visualization) {
+        // Process frame — run full visualization pipeline when either the local
+        // display or the web stream is active (both need the annotated frame).
+        if (config_.enable_visualization || config_.enable_web_streaming) {
             processFrameWithVisualization(frame);
-            
-            // Display frame
-            try {
-                cv::imshow("Edge AI Multi-Sport Tracker", frame);
-                if (cv::waitKey(1) == 'q') {
-                    running_ = false;
+
+            if (config_.enable_visualization) {
+                try {
+                    cv::imshow("Edge AI Multi-Sport Tracker", frame);
+                    if (cv::waitKey(1) == 'q') {
+                        running_ = false;
+                    }
+                } catch (cv::Exception& e) {
+                    std::cerr << "\n\nERROR: Cannot display window!" << std::endl;
+                    std::cerr << "Details: " << e.what() << std::endl;
+                    std::cerr << "\nDisabling visualization. Tracker will continue without display." << std::endl;
+                    std::cerr << "\nPossible solutions:" << std::endl;
+                    std::cerr << "  1. Set QT_QPA_PLATFORM=xcb (for XWayland compatibility)" << std::endl;
+                    std::cerr << "  2. Verify Qt5 libraries are installed: qtbase5-dev qtwayland5" << std::endl;
+                    std::cerr << "  3. Use --no-viz flag to run without display\n" << std::endl;
+                    config_.enable_visualization = false;
                 }
-            } catch (cv::Exception& e) {
-                std::cerr << "\n\nERROR: Cannot display window!" << std::endl;
-                std::cerr << "Details: " << e.what() << std::endl;
-                std::cerr << "\nDisabling visualization. Tracker will continue without display." << std::endl;
-                std::cerr << "\nPossible solutions:" << std::endl;
-                std::cerr << "  1. Set QT_QPA_PLATFORM=xcb (for XWayland compatibility)" << std::endl;
-                std::cerr << "  2. Verify Qt5 libraries are installed: qtbase5-dev qtwayland5" << std::endl;
-                std::cerr << "  3. Use --no-viz flag to run without display\n" << std::endl;
-                config_.enable_visualization = false;  // Disable to avoid repeated errors
             }
         } else {
             processFrame(frame.data, frame.cols, frame.rows);
@@ -205,23 +243,45 @@ void TrackerServer::processFrame(const void* frame_data, int width, int height) 
 }
 
 GimbalAngles TrackerServer::computeGimbalAngles(const EstimatedState& state) {
-    // Simple proportional control
-    // Map pixel position to gimbal angles
-    
-    // Assuming (0,0) is center of frame
-    // Positive X = right, positive Y = down
-    
-    // Map X position to pan angle
-    float frame_center_x = config_.vision.input_width / 2.0f;
-    float x_error = state.position.x - frame_center_x;
-    float pan_angle = (x_error / frame_center_x) * 1.0f;  // Max 1 radian
-    
-    // Map Y position to tilt angle
-    float frame_center_y = config_.vision.input_height / 2.0f;
-    float y_error = state.position.y - frame_center_y;
-    float tilt_angle = -(y_error / frame_center_y) * 0.5f;  // Max 0.5 radian
-    
-    return GimbalAngles(pan_angle, tilt_angle);
+    // Incremental visual servoing — each frame we nudge the accumulated gimbal
+    // angle by a small amount proportional to the pixel error.  This avoids the
+    // oscillation caused by mapping raw pixel position to a new absolute angle
+    // every frame (which creates a closed-loop instability at 30 Hz).
+    //
+    // Tuning knobs:
+    //   GAIN_PAN / GAIN_TILT  — radians per normalised-error per frame.
+    //                           Start small; increase for faster tracking.
+    //   DEAD_ZONE             — fractional half-width (0..1) of the "still" zone.
+    //                           Prevents jitter from detector noise near centre.
+
+    static constexpr float GAIN_PAN   = 0.015f;  // ~0.86 deg per frame at full error
+    static constexpr float GAIN_TILT  = 0.010f;
+    static constexpr float DEAD_ZONE  = 0.04f;   // 4% of half-frame — ~26 px at 1280
+
+    // Limits (radians) — clamp accumulated state to keep gimbal in safe range
+    static constexpr float PAN_MAX    =  1.57f;  // ±90°
+    static constexpr float TILT_MAX   =  0.79f;  // ±45°
+
+    float frame_half_x = config_.vision.input_width  / 2.0f;
+    float frame_half_y = config_.vision.input_height / 2.0f;
+
+    // Normalised error: -1 (full left/up) .. +1 (full right/down)
+    float norm_x =  (state.position.x - frame_half_x) / frame_half_x;
+    float norm_y =  (state.position.y - frame_half_y) / frame_half_y;
+
+    // Apply dead zone
+    if (std::abs(norm_x) < DEAD_ZONE) norm_x = 0.0f;
+    if (std::abs(norm_y) < DEAD_ZONE) norm_y = 0.0f;
+
+    // Accumulate
+    current_pan_rad_  += GAIN_PAN  * norm_x;
+    current_tilt_rad_ -= GAIN_TILT * norm_y;  // camera Y+ is down; tilt+ is up
+
+    // Clamp to safe range
+    current_pan_rad_  = std::max(-PAN_MAX,  std::min(PAN_MAX,  current_pan_rad_));
+    current_tilt_rad_ = std::max(-TILT_MAX, std::min(TILT_MAX, current_tilt_rad_));
+
+    return GimbalAngles(current_pan_rad_, current_tilt_rad_);
 }
 
 void TrackerServer::updateSearchROI(const EstimatedState& state, int frame_width, int frame_height) {
@@ -427,11 +487,11 @@ process_detection:
 void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
     // Run core detection and tracking logic
     auto result = detectAndTrack(frame);
-    
+
     // Send motor commands using Kalman-filtered current state
-    // This is already the optimal blend of prediction + measurement
+    GimbalAngles angles{0.0f, 0.0f};
     if (result.has_state) {
-        auto angles = computeGimbalAngles(result.current_state);
+        angles = computeGimbalAngles(result.current_state);
         motor_->setTargetAngles(angles);
     }
     
@@ -554,6 +614,33 @@ void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
     cv::putText(frame, "Green: Detection | Blue: Kalman Filtered (Gimbal Aim) | Red: Expected Future", 
                cv::Point(10, frame.rows - 10),
                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
+
+    // Push annotated frame + telemetry to web stream if enabled
+    if (stream_server_ && config_.enable_web_streaming) {
+        TelemetryData telem;
+        {
+            std::lock_guard<std::mutex> lock(stats_mutex_);
+            telem.fps         = stats_.fps;
+            telem.frame_count = stats_.frames_processed;
+        }
+        telem.has_detection = result.has_detection;
+        if (result.has_detection) {
+            telem.confidence = result.detection.confidence;
+        }
+        if (result.has_state) {
+            telem.pos_x = result.current_state.position.x;
+            telem.pos_y = result.current_state.position.y;
+            telem.vel_x = result.current_state.velocity.vx;
+            telem.vel_y = result.current_state.velocity.vy;
+        }
+        telem.pan_deg  = angles.pan  * (180.0f / static_cast<float>(M_PI));
+        telem.tilt_deg = angles.tilt * (180.0f / static_cast<float>(M_PI));
+        telem.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+
+        stream_server_->pushFrame(frame);
+        stream_server_->pushTelemetry(telem);
+    }
 }
 
 } // namespace tracker

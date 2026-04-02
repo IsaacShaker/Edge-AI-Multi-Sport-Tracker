@@ -48,6 +48,18 @@ public:
     virtual void disconnect() = 0;
     
     /**
+     * @brief Enable motors from the motor controller
+     * @return true if motors enabled successfully
+     */
+    virtual bool enableMotors() = 0;
+
+    /**
+     * @brief Disable motors from the motor controller
+     * @return true if motors disabled successfully
+     */
+    virtual bool disableMotors() = 0;
+
+    /**
      * @brief Set target gimbal angles
      * @param angles Target pan/tilt angles in radians
      * @return true if command sent successfully

@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Edge AI Sport Tracker</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        background: #0d0f14;
+        color: #e0e6f0;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 24px;
+        background: #161b27;
+        border-bottom: 1px solid #2a3145;
+      }
+
+      header h1 {
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: #7eb8f7;
+        letter-spacing: 0.3px;
+      }
+
+      #conn {
+        font-size: 0.78rem;
+        padding: 4px 12px;
+        border-radius: 20px;
+        background: #1e2535;
+        color: #555;
+        transition: all 0.3s;
+      }
+
+      #conn.live {
+        background: #0d2b1a;
+        color: #3ddc84;
+      }
+      #conn.err {
+        background: #2b0d0d;
+        color: #ff5b5b;
+      }
+
+      main {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 1fr 310px;
+        gap: 16px;
+        padding: 16px;
+        max-width: 1400px;
+        width: 100%;
+        margin: 0 auto;
+      }
+
+      @media (max-width: 860px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* ── Video panel ── */
+      .vpanel {
+        background: #161b27;
+        border-radius: 10px;
+        border: 1px solid #2a3145;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 380px;
+        position: relative;
+      }
+
+      #stream {
+        width: 100%;
+        height: auto;
+        display: block;
+        border-radius: 10px;
+      }
+
+      #placeholder {
+        text-align: center;
+        color: #444;
+        padding: 40px;
+        position: absolute;
+      }
+
+      #placeholder .icon {
+        font-size: 3rem;
+        margin-bottom: 8px;
+      }
+
+      /* ── Metrics panel ── */
+      .mpanel {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .card {
+        background: #161b27;
+        border-radius: 10px;
+        border: 1px solid #2a3145;
+        padding: 16px;
+      }
+
+      .card h2 {
+        font-size: 0.68rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: #3a5070;
+        margin-bottom: 12px;
+      }
+
+      .mrow {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+        border-bottom: 1px solid #1e2535;
+      }
+
+      .mrow:last-child {
+        border-bottom: none;
+      }
+
+      .ml {
+        font-size: 0.82rem;
+        color: #7888a0;
+      }
+      .mv {
+        font-size: 0.88rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        color: #c0d0e8;
+      }
+
+      /* ── FPS display ── */
+      .fps {
+        font-size: 2.6rem;
+        font-weight: 700;
+        color: #7eb8f7;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+        margin-bottom: 2px;
+      }
+
+      .fps-lbl {
+        font-size: 0.68rem;
+        color: #3a5070;
+        margin-bottom: 10px;
+      }
+
+      /* ── Detection indicator ── */
+      .det {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 13px;
+        border-radius: 8px;
+        background: #1e2535;
+        transition: all 0.3s;
+      }
+
+      .det.on {
+        background: #0d2b1a;
+      }
+
+      .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #333;
+        flex-shrink: 0;
+        transition: background 0.3s;
+      }
+
+      .det.on .dot {
+        background: #3ddc84;
+        box-shadow: 0 0 6px #3ddc84;
+      }
+
+      .dtxt {
+        font-size: 0.83rem;
+        font-weight: 600;
+        color: #7888a0;
+      }
+      .det.on .dtxt {
+        color: #3ddc84;
+      }
+
+      /* ── Confidence bar ── */
+      .bar-wrap {
+        margin-top: 10px;
+      }
+
+      .bar-top {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.7rem;
+        color: #3a5070;
+        margin-bottom: 3px;
+      }
+
+      .bar-bg {
+        background: #1e2535;
+        border-radius: 4px;
+        height: 5px;
+        overflow: hidden;
+      }
+
+      .bar-fill {
+        height: 100%;
+        border-radius: 4px;
+        background: #7eb8f7;
+        transition: width 0.3s;
+        width: 0%;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>&#127922; Edge AI Multi-Sport Tracker</h1>
+      <div id="conn">Connecting&hellip;</div>
+    </header>
+
+    <main>
+      <!-- Live video feed -->
+      <div class="vpanel">
+        <div id="placeholder">
+          <div class="icon">&#128225;</div>
+          <div>Waiting for stream&hellip;</div>
+        </div>
+        <img
+          id="stream"
+          src="/stream"
+          alt="Live Feed"
+          style="display: none"
+          onload="
+            this.style.display = 'block';
+            document.getElementById('placeholder').style.display = 'none';
+          "
+          onerror="
+            this.style.display = 'none';
+            document.getElementById('placeholder').style.display = 'block';
+          "
+        />
+      </div>
+
+      <!-- Metrics sidebar -->
+      <div class="mpanel">
+        <div class="card">
+          <h2>Performance</h2>
+          <div id="fps" class="fps">--</div>
+          <div class="fps-lbl">FRAMES PER SECOND</div>
+          <div id="det" class="det">
+            <div class="dot"></div>
+            <div id="dtxt" class="dtxt">Waiting&hellip;</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Object Position</h2>
+          <div class="mrow">
+            <span class="ml">X</span>
+            <span class="mv" id="px">&mdash;</span>
+          </div>
+          <div class="mrow">
+            <span class="ml">Y</span>
+            <span class="mv" id="py">&mdash;</span>
+          </div>
+          <div class="mrow">
+            <span class="ml">Speed</span>
+            <span class="mv" id="spd">&mdash;</span>
+          </div>
+          <div class="bar-wrap">
+            <div class="bar-top">
+              <span>Confidence</span>
+              <span id="cpct">0%</span>
+            </div>
+            <div class="bar-bg">
+              <div id="cbar" class="bar-fill"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Gimbal Angles</h2>
+          <div class="mrow">
+            <span class="ml">Pan</span>
+            <span class="mv" id="pan">&mdash;</span>
+          </div>
+          <div class="mrow">
+            <span class="ml">Tilt</span>
+            <span class="mv" id="tilt">&mdash;</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Session</h2>
+          <div class="mrow">
+            <span class="ml">Frames processed</span>
+            <span class="mv" id="fc">0</span>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      (function () {
+        function $(id) {
+          return document.getElementById(id);
+        }
+
+        var conn = $("conn");
+        var fpsEl = $("fps");
+        var det = $("det");
+        var dtxt = $("dtxt");
+        var es = null;
+
+        function connect() {
+          if (es) es.close();
+          es = new EventSource("/telemetry");
+
+          es.onopen = function () {
+            conn.textContent = "\u25cf LIVE";
+            conn.className = "live";
+          };
+
+          es.onmessage = function (e) {
+            try {
+              update(JSON.parse(e.data));
+            } catch (_) {}
+          };
+
+          es.onerror = function () {
+            conn.textContent = "Reconnecting\u2026";
+            conn.className = "err";
+            es.close();
+            setTimeout(connect, 3000);
+          };
+        }
+
+        function fmt(v, decimals) {
+          return typeof v === "number" ? v.toFixed(decimals) : "--";
+        }
+
+        function update(d) {
+          fpsEl.textContent = d.fps != null ? d.fps : "--";
+
+          if (d.has_detection) {
+            det.className = "det on";
+            dtxt.textContent =
+              "Tracking \u2014 " + (d.confidence * 100).toFixed(0) + "% conf";
+          } else {
+            det.className = "det";
+            dtxt.textContent = "Searching\u2026";
+          }
+
+          $("px").textContent = fmt(d.pos_x, 1) + " px";
+          $("py").textContent = fmt(d.pos_y, 1) + " px";
+
+          var spd = Math.sqrt(
+            (d.vel_x || 0) * (d.vel_x || 0) + (d.vel_y || 0) * (d.vel_y || 0),
+          );
+          $("spd").textContent = spd.toFixed(1) + " px/s";
+
+          $("pan").textContent = fmt(d.pan_deg, 2) + "\xb0";
+          $("tilt").textContent = fmt(d.tilt_deg, 2) + "\xb0";
+          $("fc").textContent = d.frame_count || 0;
+
+          var pct = Math.min(100, (d.confidence || 0) * 100);
+          $("cpct").textContent = pct.toFixed(0) + "%";
+          $("cbar").style.width = pct + "%";
+        }
+
+        connect();
+      })();
+    </script>
+  </body>
+</html>

@@ -6,6 +6,7 @@
 #include "../factories/vision_factory.h"
 #include "../factories/estimator_factory.h"
 #include "../factories/motor_factory.h"
+#include "../streaming/stream_server.h"
 #include <memory>
 #include <thread>
 #include <atomic>
@@ -26,14 +27,16 @@ struct ServerConfig : public Config {
     MotorConfig motor;
     
     // Server parameters
-    int camera_device_id;
+    // Accepts either an integer device index ("0", "1") or a full
+    // GStreamer pipeline string (used for libcamera on Raspberry Pi).
+    std::string camera_source;
     float target_fps;
     bool enable_visualization;
     bool enable_web_streaming;
     int web_port;
     
     ServerConfig()
-        : camera_device_id(0),
+        : camera_source("0"),
           target_fps(30.0f),
           enable_visualization(true),
           enable_web_streaming(false),
@@ -122,10 +125,17 @@ private:
     float last_detection_size_;        // Size of last successful detection
     
     // Prediction Error Logging
-    std::ofstream prediction_log_;     // CSV log file for prediction analysis
-    EstimatedState last_prediction_;   // Previous frame's prediction for comparison
-    bool has_last_prediction_;         // Whether we have a previous prediction to compare
-    int frame_count_;                  // Frame counter for logging
+    std::ofstream prediction_log_;
+    EstimatedState last_prediction_;
+    bool has_last_prediction_;
+    int frame_count_;
+
+    // Incremental gimbal state — accumulated absolute target sent to firmware
+    float current_pan_rad_;
+    float current_tilt_rad_;
+
+    // Web streaming
+    std::unique_ptr<StreamServer> stream_server_;
     
     /**
      * @brief Main tracking loop (runs in separate thread)

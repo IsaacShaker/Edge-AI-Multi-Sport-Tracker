@@ -26,9 +26,12 @@ void printUsage() {
     std::cout << "  --vision <type>       Vision detector type (color_based, yolo)" << std::endl;
     std::cout << "  --estimator <type>    State estimator type (kalman_cv, kalman_ca, imm)" << std::endl;
     std::cout << "  --motor <type>        Motor controller type (simplefoc, mock)" << std::endl;
+    std::cout << "  --serial-port <dev>   Serial port for SimpleFOC controller (default: /dev/ttyACM0)" << std::endl;
     std::cout << "  --camera <id>         Camera device ID (default: 0)" << std::endl;
     std::cout << "  --no-viz              Disable visualization" << std::endl;
     std::cout << "  --no-roi              Disable ROI optimization (always use full frame)" << std::endl;
+    std::cout << "  --web-stream          Enable web streaming dashboard (default: disabled)" << std::endl;
+    std::cout << "  --port <port>         Web streaming port (default: 8080)" << std::endl;
     std::cout << "  --help                Show this help message" << std::endl;
 }
 
@@ -77,14 +80,23 @@ int main(int argc, char** argv) {
         else if (arg == "--motor" && i + 1 < argc) {
             config.motor.controller_type = argv[++i];
         }
+        else if (arg == "--serial-port" && i + 1 < argc) {
+            config.motor.serial_port = argv[++i];
+        }
         else if (arg == "--camera" && i + 1 < argc) {
-            config.camera_device_id = std::atoi(argv[++i]);
+            config.camera_source = argv[++i];
         }
         else if (arg == "--no-viz") {
             config.enable_visualization = false;
         }
         else if (arg == "--no-roi") {
             enable_roi = false;
+        }
+        else if (arg == "--web-stream") {
+            config.enable_web_streaming = true;
+        }
+        else if (arg == "--port" && i + 1 < argc) {
+            config.web_port = std::stoi(argv[++i]);
         }
         else {
             std::cerr << "Unknown option: " << arg << std::endl;
@@ -98,8 +110,11 @@ int main(int argc, char** argv) {
     std::cout << "Vision:    " << config.vision.model_type << std::endl;
     std::cout << "Estimator: " << config.estimator.estimator_type << std::endl;
     std::cout << "Motor:     " << config.motor.controller_type << std::endl;
-    std::cout << "Camera:    " << config.camera_device_id << std::endl;
+    std::cout << "Camera:    " << config.camera_source << std::endl;
     std::cout << "ROI:       " << (enable_roi ? "Enabled" : "Disabled") << std::endl;
+    if (config.enable_web_streaming) {
+        std::cout << "Streaming: http://0.0.0.0:" << config.web_port << std::endl;
+    }
     std::cout << "=====================\n" << std::endl;
     
     // Create and initialize server
