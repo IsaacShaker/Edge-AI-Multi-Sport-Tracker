@@ -442,21 +442,21 @@ void setup() {
   // -------------------------------------------------
 
   //STM32F4 SETUP
-  // TwoWire BottomWire(PB7, PB6); //Bottom SDA / SCL
-  // TwoWire TopWire(PB9, PB8); //Top SDA / SCL
+  TwoWire BottomWire(YAW_SDA_Pin, YAW_SCL_Pin); //Bottom SDA / SCL
+  TwoWire TopWire(PITCH_SDA_Pin, PITCH_SCL_Pin); //Top SDA / SCL
 
-  // Serial.println(F("Init bottom sensor (Wire / SDA0)..."));
-  // sensorBottom.init(&BottomWire);   // I2C bus 0 (SDA0/SCL0)
-
-  // Serial.println(F("Init top sensor (Wire1 / SDA1)..."));
-  // sensorTop.init(&TopWire);     // I2C bus 1 (SDA1/SCL1)
-
-  //Teensy 4.1 SETUP
   Serial.println(F("Init bottom sensor (Wire / SDA0)..."));
-  sensorBottom.init(&Wire);   // I2C bus 0 (SDA0/SCL0)
+  sensorBottom.init(&BottomWire);   // I2C bus 0 (SDA0/SCL0)
 
   Serial.println(F("Init top sensor (Wire1 / SDA1)..."));
-  sensorTop.init(&Wire1);     // I2C bus 1 (SDA1/SCL1)
+  sensorTop.init(&TopWire);     // I2C bus 1 (SDA1/SCL1)
+
+  //Teensy 4.1 SETUP
+  // Serial.println(F("Init bottom sensor (Wire / SDA0)..."));
+  // sensorBottom.init(&Wire);   // I2C bus 0 (SDA0/SCL0)
+
+  // Serial.println(F("Init top sensor (Wire1 / SDA1)..."));
+  // sensorTop.init(&Wire1);     // I2C bus 1 (SDA1/SCL1)
 
 
 
@@ -613,24 +613,24 @@ void loop() {
   }
 
 
-  //ANTHONY'S SHIT
-  pinMode()
-  digitalWrite()
-  digitalRead()
+  // //ANTHONY'S SHIT
+  // pinMode()
+  // digitalWrite()
+  // digitalRead()
 
-  //ADC
-  current_sys = systemCurrent(digitalRead(PA1));
-  voltage_sys = systemVoltage(digitalRead(PA0));
-  power_sys = current_sys * voltage_sys
-  current_3V3 = currentSense(digitalRead(PC2), 0.0015);
-  current_5V = currentSense(digitalRead(PC0), 0.0015);
-  current_12V = currentSense(digitalRead(PC1), 0.0015);
-  current_BP1 = currentSense(digitalRead(PA4), 0.0100);
-  current_TP1 = currentSense(digitalRead(PC5), 0.0100);
-  current_BP2 = currentSense(digitalRead(PA5), 0.0100);
-  current_TP2 = currentSense(digitalRead(PC4), 0.0100);
-  current_BP3 = currentSense(digitalRead(PA6), 0.0100);
-  current_TP3 = currentSense(digitalRead(PC3), 0.0100);
+  // //ADC
+  // current_sys = systemCurrent(digitalRead(PA1));
+  // voltage_sys = systemVoltage(digitalRead(PA0));
+  // power_sys = current_sys * voltage_sys
+  // current_3V3 = currentSense(digitalRead(PC2), 0.0015);
+  // current_5V = currentSense(digitalRead(PC0), 0.0015);
+  // current_12V = currentSense(digitalRead(PC1), 0.0015);
+  // current_BP1 = currentSense(digitalRead(PA4), 0.0100);
+  // current_TP1 = currentSense(digitalRead(PC5), 0.0100);
+  // current_BP2 = currentSense(digitalRead(PA5), 0.0100);
+  // current_TP2 = currentSense(digitalRead(PC4), 0.0100);
+  // current_BP3 = currentSense(digitalRead(PA6), 0.0100);
+  // current_TP3 = currentSense(digitalRead(PC3), 0.0100);
 
   //Inputs
 
