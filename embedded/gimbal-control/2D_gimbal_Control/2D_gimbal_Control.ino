@@ -9,9 +9,10 @@
 #include "power_telemetry.h"
 
 //---------------------------------------
-//    CLOCK CONFIGURATION
+//    CLOCK CONFIGURATION (only done on STM32F412RET6TR)
 //---------------------------------------
 
+#if defined(ARDUINO_ARCH_STM32)
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
@@ -54,6 +55,16 @@ void SystemClock_Config(void)
   }
 }
 
+
+#else
+
+void SystemClock_Config(void)
+{
+  //NO-Op on any other plaform than STM32F4.
+}
+
+#endif
+
 //---------------------------------------
 //    SENSOR CONFIGURATION
 //---------------------------------------
@@ -77,6 +88,7 @@ BLDCDriver3PWM driverTop = BLDCDriver3PWM(T_PH1, T_PH2 , T_PH3, T_EN);  // PWM p
 //    CONTROL VARIABLES
 //---------------------------------------
 
+
 //Motor Movement Limits
 float target_angle_bottom = 0;  // pan/yaw target (radians)
 float target_angle_top = 0;     // tilt/pitch target (radians)
@@ -91,11 +103,18 @@ float home_angle_top = 0;     // tilt/pitch target (radians) default
 
 //Positional Telemetry
 bool returnPosition = false; //Position Logging (Serial)
-unsigned long last_time = 0;
-uint32_t counter = 0;
+unsigned long pos_last_time = 0;
+uint32_t pos_counter = 0;
 
-//Power Telemetry
-bool checkPower = false; //Enable power telemetry and firmware-level safety.
+/*
+Power Telemetry
+*/
+bool checkPower = false; //Power Safety
+unsigned long pow_last_time = 0;
+uint32_t pow_counter = 0;
+
+bool returnPower = false; //Power Return
+
 float current_sys = 0;
 float voltage_sys = 0;
 float current_12V = 0;
@@ -406,8 +425,8 @@ void recordData(char* cmd){
   if (sscanf(cmd, "%f", &recordData) == 1){
     if(recordData){ 
       returnPosition = true;
-      last_time = 0;
-      counter = 0;
+      pos_last_time = 0;
+      pos_counter = 0;
       Serial.println("time_ms,top_angle,bottom_angle");
 
     }
@@ -421,7 +440,43 @@ void recordData(char* cmd){
 }
 
 void powerCheck(){
-  return;
+  //System Total Voltage Rule
+  if(voltage_sys > VOLT_SYS_MAX){
+    //Map to actual enable pin later.
+    Serial.println("\n\n!!! VOLT_SYS_MAX EXCEEDED! !!!\n\n");
+  }
+  
+  //System Total Current Rule
+  if(current_sys > CURR_SYS_MAX){
+    //Map to actual enable pin later.
+    Serial.println("\n\n!!! CURR_SYS_MAX EXCEEDED! !!!\n\n");
+  }
+  
+  //12V Rail Current Rule
+  if(current_12V > CURR_12V_MAX){
+    //Map to actual enable pin later.
+    Serial.println("\n\n!!! CURR_12V_MAX EXCEEDED! !!!\n\n");
+  }
+
+  //12V Rail Current Rule
+  if(current_5V > CURR_5V_MAX){
+    //Map to actual enable pin later.
+    Serial.println("\n\n!!! CURR_5V_MAX EXCEEDED! !!!\n\n");
+  }
+
+  //12V Rail Current Rule
+  if(current_3V3 > CURR_3V3_MAX){
+    //Map to actual enable pin later.
+    Serial.println("\n\n!!! CURR_3V3_MAX EXCEEDED! !!!\n\n");
+  }
+  
+  //Top and Bottom Motor Current Rule
+  if(((current_BP1 + current_BP2 + current_BP3) > CURR_PHASE_MAX) || ((current_TP1 + current_TP2 + current_TP3) > CURR_PHASE_MAX)){
+    motorBottom.disable();
+    motorTop.disable();
+    //Map to actual enable pin(s) later.
+    Serial.println("\n\n!!! MOTOR CURRENT MAX(S) EXCEEDED! !!!\n\n");
+  }
 }
 
 
@@ -432,7 +487,13 @@ void powerCheck(){
 //---------------------------------------
 
 void setup() {
+
+  #if defined(ARDUINO_ARCH_STM32)
+  TwoWire BottomWire(YAW_SDA_Pin, YAW_SCL_Pin);
+  TwoWire TopWire(PITCH_SDA_Pin, PITCH_SCL_Pin);
   SystemClock_Config();
+  #endif
+
   Serial.begin(115200);
   SimpleFOCDebug::enable(&Serial);
   Serial.println(F("=== 2D Gimbal Initializing ==="));
@@ -441,22 +502,25 @@ void setup() {
   // Initialize sensors - COMMENT OUT CODE BLOCKS
   // -------------------------------------------------
 
-  //STM32F4 SETUP
-  TwoWire BottomWire(YAW_SDA_Pin, YAW_SCL_Pin); //Bottom SDA / SCL
-  TwoWire TopWire(PITCH_SDA_Pin, PITCH_SCL_Pin); //Top SDA / SCL
+  //
+  #if defined(ARDUINO_ARCH_STM32)
+      Serial.println(F("Init bottom sensor (BottomWire)..."));
+      BottomWire.begin();
+      sensorBottom.init(&BottomWire);
 
-  Serial.println(F("Init bottom sensor (Wire / SDA0)..."));
-  sensorBottom.init(&BottomWire);   // I2C bus 0 (SDA0/SCL0)
+      Serial.println(F("Init top sensor (TopWire)..."));
+      TopWire.begin();
+      sensorTop.init(&TopWire);
+  #else
+      Serial.println(F("Init bottom sensor (Wire)..."));
+      Wire.begin();
+      sensorBottom.init(&Wire);
 
-  Serial.println(F("Init top sensor (Wire1 / SDA1)..."));
-  sensorTop.init(&TopWire);     // I2C bus 1 (SDA1/SCL1)
+      Serial.println(F("Init top sensor (Wire1)..."));
+      Wire1.begin();
+      sensorTop.init(&Wire1);
+  #endif
 
-  //Teensy 4.1 SETUP
-  // Serial.println(F("Init bottom sensor (Wire / SDA0)..."));
-  // sensorBottom.init(&Wire);   // I2C bus 0 (SDA0/SCL0)
-
-  // Serial.println(F("Init top sensor (Wire1 / SDA1)..."));
-  // sensorTop.init(&Wire1);     // I2C bus 1 (SDA1/SCL1)
 
 
 
@@ -597,14 +661,14 @@ void loop() {
   motorBottom.move(target_angle_bottom);
   motorTop.move(target_angle_top);
 
-  // Return positional telemetry (if enabled) in CSV format.
+  // Return positional telemetry every 10ms (if enabled) in CSV format.
   if(returnPosition){
-    if (millis() - last_time >= 10) {
-      last_time += 10;
-      counter += 10;
+    if (millis() - pos_last_time >= 10) {
+      pos_last_time += 10;
+      pos_counter += 10;
 
       Serial.print(",");
-      Serial.print(counter);                   // time
+      Serial.print(pos_counter);                   // time
       Serial.print(",");
       Serial.print(motorTop.shaftAngle(), 3);  // top motor
       Serial.print(",");
@@ -612,13 +676,24 @@ void loop() {
     }
   }
 
+  //Check the power values of the current and voltage lines at a rate of ~75hz.
+  if(checkPower){
+    if (millis() - pow_last_time >= 13) {
+      pow_last_time += 13;
+      pow_counter += 13;
+      powerCheck();
+    }
+  }
+
+
+
 
   // //ANTHONY'S SHIT
   // pinMode()
   // digitalWrite()
   // digitalRead()
 
-  // //ADC
+  //ADC
   // current_sys = systemCurrent(digitalRead(PA1));
   // voltage_sys = systemVoltage(digitalRead(PA0));
   // power_sys = current_sys * voltage_sys
@@ -646,19 +721,3 @@ void loop() {
   // Serial command processing
   command.run();
 }
-
-/**
- *
-bool checkPower = false; //Enable power telemetry and firmware-level safety.
-float current_sys = 0;
-float voltage_sys = 0;
-float current_12V = 0;
-float current_5V = 0;
-float current_3V3 = 0;
-float current_BP1 = 0;
-float current_TP1 = 0;
-float current_BP2 = 0;
-float current_TP2 = 0;
-float current_BP3 = 0;
-float current_TP3 = 0;
- */

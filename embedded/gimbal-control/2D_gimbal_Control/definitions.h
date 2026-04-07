@@ -43,6 +43,17 @@ POWER TELEMETRY PINOUTS
 #define GAIN
 
 /**
+POWER SAFETY THRESHOLDS
+*/
+
+#define VOLT_SYS_MAX    15
+#define CURR_SYS_MAX    15
+#define CURR_12V_MAX    15
+#define CURR_5V_MAX     15
+#define CURR_3V3_MAX    15
+#define CURR_PHASE_MAX  2
+
+/**
 PRIVATE DEFINES
 */
 #define EXT_INT_Pin GPIO_PIN_13
