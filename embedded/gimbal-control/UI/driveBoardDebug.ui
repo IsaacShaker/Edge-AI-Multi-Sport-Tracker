@@ -6,15 +6,82 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>691</width>
-    <height>651</height>
+    <width>728</width>
+    <height>810</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Form</string>
   </property>
   <layout class="QGridLayout" name="gridLayout_2">
-   <item row="8" column="0" colspan="2">
+   <item row="13" column="0" colspan="2">
+    <widget class="Line" name="line_3">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+    </widget>
+   </item>
+   <item row="12" column="0" colspan="2">
+    <layout class="QGridLayout" name="gridLayout_5">
+     <item row="0" column="1">
+      <widget class="QPushButton" name="testYawScan">
+       <property name="text">
+        <string>Yaw Scan Mode</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="0">
+      <widget class="QPushButton" name="testScanMode">
+       <property name="text">
+        <string>Full Scan Mode</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item row="11" column="0" colspan="2" alignment="Qt::AlignHCenter">
+    <widget class="QLabel" name="label_20">
+     <property name="font">
+      <font>
+       <pointsize>12</pointsize>
+       <weight>75</weight>
+       <bold>true</bold>
+      </font>
+     </property>
+     <property name="text">
+      <string>Test Programs</string>
+     </property>
+    </widget>
+   </item>
+   <item row="10" column="0" colspan="2">
+    <widget class="Line" name="line_5">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+    </widget>
+   </item>
+   <item row="5" column="0" colspan="2" alignment="Qt::AlignHCenter">
+    <widget class="QLabel" name="label_21">
+     <property name="font">
+      <font>
+       <pointsize>12</pointsize>
+       <weight>75</weight>
+       <bold>true</bold>
+      </font>
+     </property>
+     <property name="text">
+      <string>Power Readings</string>
+     </property>
+    </widget>
+   </item>
+   <item row="6" column="0">
+    <widget class="QLabel" name="label_22">
+     <property name="text">
+      <string>V_SYS</string>
+     </property>
+    </widget>
+   </item>
+   <item row="14" column="0" colspan="2">
     <widget class="QTextBrowser" name="terminalOutput"/>
    </item>
    <item row="2" column="0" colspan="2">
@@ -788,47 +855,35 @@
      </property>
     </widget>
    </item>
-   <item row="6" column="0" colspan="2">
-    <layout class="QGridLayout" name="gridLayout_5">
-     <item row="0" column="1">
-      <widget class="QPushButton" name="testYawScan">
-       <property name="text">
-        <string>Yaw Scan Mode</string>
-       </property>
-      </widget>
-     </item>
-     <item row="0" column="0">
-      <widget class="QPushButton" name="testScanMode">
-       <property name="text">
-        <string>Full Scan Mode</string>
-       </property>
-      </widget>
-     </item>
-    </layout>
+   <item row="7" column="0">
+    <widget class="QProgressBar" name="BAR_VOLT_SYS">
+     <property name="maximum">
+      <number>15</number>
+     </property>
+     <property name="value">
+      <number>14</number>
+     </property>
+    </widget>
+   </item>
+   <item row="6" column="1">
+    <widget class="QLabel" name="label_23">
+     <property name="text">
+      <string>CURR_SYS</string>
+     </property>
+    </widget>
+   </item>
+   <item row="7" column="1">
+    <widget class="QProgressBar" name="BAR_CURR_SYS">
+     <property name="maximum">
+      <number>10</number>
+     </property>
+     <property name="value">
+      <number>7</number>
+     </property>
+    </widget>
    </item>
    <item row="4" column="0" colspan="2">
-    <widget class="Line" name="line_5">
-     <property name="orientation">
-      <enum>Qt::Horizontal</enum>
-     </property>
-    </widget>
-   </item>
-   <item row="5" column="0" colspan="2" alignment="Qt::AlignHCenter">
-    <widget class="QLabel" name="label_20">
-     <property name="font">
-      <font>
-       <pointsize>12</pointsize>
-       <weight>75</weight>
-       <bold>true</bold>
-      </font>
-     </property>
-     <property name="text">
-      <string>Test Programs</string>
-     </property>
-    </widget>
-   </item>
-   <item row="7" column="0" colspan="2">
-    <widget class="Line" name="line_3">
+    <widget class="Line" name="line_6">
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
      </property>

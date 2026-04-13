@@ -12,20 +12,13 @@
 //    CLOCK CONFIGURATION (only done on STM32F412RET6TR)
 //---------------------------------------
 
-#if defined(ARDUINO_ARCH_STM32)
-void SystemClock_Config(void)
-{
+extern "C" void SystemClock_Config(void) {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-  /** Configure the main internal regulator output voltage
-  */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
-  /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -34,36 +27,39 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLN = 192;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 4;
+#if defined(RCC_PLLR_SUPPORT)
   RCC_OscInitStruct.PLL.PLLR = 2;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
-    Error_Handler();
+#endif
+
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
+    while (1) {}
   }
 
-  /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK |
+                                RCC_CLOCKTYPE_SYSCLK |
+                                RCC_CLOCKTYPE_PCLK1 |
+                                RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
-  {
-    Error_Handler();
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK) {
+    while (1) {}
   }
+
+  // Make sure the global clock variable is updated
+  SystemCoreClockUpdate();
 }
 
 
-#else
+//---------------------------------------
+//    SERIAL DEBUG
+//---------------------------------------
+HardwareSerial SerialCM(USART2);
+HardwareSerial SerialDebug(USART3);
+#define Serial SerialDebug
 
-void SystemClock_Config(void)
-{
-  //NO-Op on any other plaform than STM32F4.
-}
-
-#endif
 
 //---------------------------------------
 //    SENSOR CONFIGURATION
@@ -116,6 +112,7 @@ uint32_t pow_counter = 0;
 bool returnPower = false; //Power Return
 
 float current_sys = 0;
+float power_sys = 0;
 float voltage_sys = 0;
 float current_12V = 0;
 float current_5V = 0;
@@ -135,7 +132,7 @@ Settings settings;  //Instatiate the gimbal settings.
 //---------------------------------------
 //    COMMANDER (Serial Interface)
 //---------------------------------------
-Commander command = Commander(Serial);
+Commander command = Commander(SerialDebug);
 
 /**
  * MOTOR MOVEMENT COMMANDS
@@ -168,7 +165,7 @@ void doTargetBottom(char* cmd) {
     }
   }
   else{
-    Serial.println("Usage: B<angle> <relative?>  (e.g., B1.0 1)");
+    SerialDebug.println("Usage: B<angle> <relative?>  (e.g., B1.0 1)");
   }
 }
 
@@ -187,7 +184,7 @@ void doTargetTop(char* cmd) {
     
   }
   else{
-    Serial.println("Usage: T<angle> <relative?>  (e.g., B1.0 1)");
+    SerialDebug.println("Usage: T<angle> <relative?>  (e.g., B1.0 1)");
   }
 }
 
@@ -200,7 +197,7 @@ void doTargetBoth(char* cmd) {
     target_angle_bottom = checkBounds(0, pan);
     target_angle_top = checkBounds(1, tilt);
   } else {
-    Serial.println("Usage: M<pan> <tilt>  (e.g., M1.57 0.5)");
+    SerialDebug.println("Usage: M<pan> <tilt>  (e.g., M1.57 0.5)");
   }
 }
 
@@ -215,16 +212,16 @@ void lock_motors(char* cmd){
     if(enableMotor){
       motorBottom.enable();
       motorTop.enable();
-      Serial.println("Motors Enabled");
+      SerialDebug.println("Motors Enabled");
     }
     else{
       motorTop.disable();
       motorBottom.disable();
-      Serial.println("Motors Disabled");
+      SerialDebug.println("Motors Disabled");
     }
   }
   else{
-    Serial.println("Usage: K <(0 for disable, 1 for enable)>");
+    SerialDebug.println("Usage: K <(0 for disable, 1 for enable)>");
   }
 }
 
@@ -243,17 +240,17 @@ void setVelocity(char* cmd) {
   if (sscanf(cmd, "%f %f", &motor, &velocity) == 2) {
     if(motor == 1){
       motorTop.velocity_limit = velocity;
-      Serial.print("Top Motor ");
+      SerialDebug.print("Top Motor ");
     }
     else{
       motorBottom.velocity_limit = velocity;
-      Serial.print("Bottom Motor ");
+      SerialDebug.print("Bottom Motor ");
     }
-    Serial.print("Velocity (Rad/s): "); Serial.println(velocity, 3);
+    SerialDebug.print("Velocity (Rad/s): "); SerialDebug.println(velocity, 3);
   }
 
   else{
-    Serial.println("Usage: V <motor (0 for bottom, 1 for top)> <velocity (rad/s)>");
+    SerialDebug.println("Usage: V <motor (0 for bottom, 1 for top)> <velocity (rad/s)>");
   }
 }
 
@@ -267,12 +264,12 @@ void bSetPID(char* cmd) {
     motorBottom.PID_velocity.I= bI;
     motorBottom.PID_velocity.D = bD;
     motorBottom.PID_velocity.reset();
-    Serial.print("bottom P: "); Serial.print(bP, 3);
-    Serial.print(" | bottom I: "); Serial.print(bI, 3);
-    Serial.print(" | bottom D: "); Serial.println(bD, 3);
+    SerialDebug.print("bottom P: "); SerialDebug.print(bP, 3);
+    SerialDebug.print(" | bottom I: "); SerialDebug.print(bI, 3);
+    SerialDebug.print(" | bottom D: "); SerialDebug.println(bD, 3);
   } 
   else {
-    Serial.println("Usage: Bconfig <P> <I> <D>");
+    SerialDebug.println("Usage: Bconfig <P> <I> <D>");
   }
 }
 
@@ -287,12 +284,12 @@ void tSetPID(char* cmd) {
     motorTop.PID_velocity.I= tI;
     motorTop.PID_velocity.D = tD;
     motorTop.PID_velocity.reset();
-    Serial.print("top P: "); Serial.print(tP, 3);
-    Serial.print(" | top I: "); Serial.print(tI, 3);
-    Serial.print(" | top D: "); Serial.println(tD, 3);
+    SerialDebug.print("top P: "); SerialDebug.print(tP, 3);
+    SerialDebug.print(" | top I: "); SerialDebug.print(tI, 3);
+    SerialDebug.print(" | top D: "); SerialDebug.println(tD, 3);
   } 
   else {
-    Serial.println("Usage: Tconfig <P> <I> <D>");
+    SerialDebug.println("Usage: Tconfig <P> <I> <D>");
   }
 }
 
@@ -305,31 +302,31 @@ void setLPF(char* cmd) {
   if (sscanf(cmd, "%f %f", &motor, &seconds) == 2) {
     if(motor == 1){
       motorTop.LPF_velocity.Tf = seconds;
-      Serial.print("Top Motor ");
+      SerialDebug.print("Top Motor ");
     }
     else{
       motorBottom.LPF_velocity.Tf = seconds;
-      Serial.print("Bottom Motor ");
+      SerialDebug.print("Bottom Motor ");
     }
-    Serial.print("Seconds (s): "); Serial.println(seconds, 3);
+    SerialDebug.print("Seconds (s): "); SerialDebug.println(seconds, 3);
   }
 
   else{
-    Serial.println("Usage: L <motor (0 for bottom, 1 for top)> <seconds (s)>");
+    SerialDebug.println("Usage: L <motor (0 for bottom, 1 for top)> <seconds (s)>");
   }
 }
 
 void getInfo(char* cmd) {
-  Serial.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+  SerialDebug.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
   //Get the position in radians of the bottom and top motor encoders.
   float bottomPos = motorBottom.shaftAngle();
   float topPos = motorTop.shaftAngle();
-  Serial.print("Top Position (Rads): "); Serial.print(topPos, 3);
-  Serial.print(" | Bottom Position (Rads): "); Serial.println(bottomPos, 3);
+  SerialDebug.print("Top Position (Rads): "); SerialDebug.print(topPos, 3);
+  SerialDebug.print(" | Bottom Position (Rads): "); SerialDebug.println(bottomPos, 3);
 
   //Return the saved home position.
-  Serial.print("Top Home Pos (Rads): "); Serial.print(home_angle_top, 3);
-  Serial.print(" | Bottom Home Pos (Rads): "); Serial.println(home_angle_bottom, 3);
+  SerialDebug.print("Top Home Pos (Rads): "); SerialDebug.print(home_angle_top, 3);
+  SerialDebug.print(" | Bottom Home Pos (Rads): "); SerialDebug.println(home_angle_bottom, 3);
 
 
   //Return the current PID values.
@@ -337,31 +334,31 @@ void getInfo(char* cmd) {
   tP = motorTop.PID_velocity.P;
   tI = motorTop.PID_velocity.I;
   tD = motorTop.PID_velocity.D;
-  Serial.print("top P: "); Serial.print(tP, 3);
-  Serial.print(" | top I: "); Serial.print(tI, 3);
-  Serial.print(" | top D: "); Serial.println(tD, 3);
+  SerialDebug.print("top P: "); SerialDebug.print(tP, 3);
+  SerialDebug.print(" | top I: "); SerialDebug.print(tI, 3);
+  SerialDebug.print(" | top D: "); SerialDebug.println(tD, 3);
 
   float bP, bI, bD;
   bP = motorBottom.PID_velocity.P;
   bI = motorBottom.PID_velocity.I;
   bD = motorBottom.PID_velocity.D;
-  Serial.print("bottom P: "); Serial.print(bP, 3);
-  Serial.print(" | bottom I: "); Serial.print(bI, 3);
-  Serial.print(" | bottom D: "); Serial.println(bD, 3);
+  SerialDebug.print("bottom P: "); SerialDebug.print(bP, 3);
+  SerialDebug.print(" | bottom I: "); SerialDebug.print(bI, 3);
+  SerialDebug.print(" | bottom D: "); SerialDebug.println(bD, 3);
 
   //return the current velocity limits.
   float bV, tV, tLPF, bLPF;
   tV = motorTop.velocity_limit;
   bV = motorBottom.velocity_limit;
-  Serial.print("bottom vlimit: "); Serial.print(bV, 3);
-  Serial.print(" | top vlimit: "); Serial.println(tV, 3);
+  SerialDebug.print("bottom vlimit: "); SerialDebug.print(bV, 3);
+  SerialDebug.print(" | top vlimit: "); SerialDebug.println(tV, 3);
   tLPF = motorTop.LPF_velocity.Tf;
   bLPF = motorBottom.LPF_velocity.Tf;
-  Serial.print("bottom LPF: "); Serial.print(bLPF, 3);
-  Serial.print(" | top LPF: "); Serial.println(tLPF, 3);
+  SerialDebug.print("bottom LPF: "); SerialDebug.print(bLPF, 3);
+  SerialDebug.print(" | top LPF: "); SerialDebug.println(tLPF, 3);
 
 
-  Serial.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+  SerialDebug.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 
 }
 
@@ -400,16 +397,16 @@ void saveSettings(char* cmd){
     settings_save(settings);
 
     // ---- Return Message ----
-    Serial.print("SAVE OK | ");
+    SerialDebug.print("SAVE OK | ");
 
-    if (savedPID)  Serial.print("PID ");
-    if (savedV)  Serial.print("VEL ");
-    if (savedHome) Serial.print("HOME ");
+    if (savedPID)  SerialDebug.print("PID ");
+    if (savedV)  SerialDebug.print("VEL ");
+    if (savedHome) SerialDebug.print("HOME ");
 
-    Serial.println();
+    SerialDebug.println();
   }
   else {
-    Serial.println("SAVE ERROR | Usage: S<pid> <vel> <home>  (ex: S1 0 1)");
+    SerialDebug.println("SAVE ERROR | Usage: S<pid> <vel> <home>  (ex: S1 0 1)");
   }
 }
 
@@ -427,7 +424,7 @@ void recordData(char* cmd){
       returnPosition = true;
       pos_last_time = 0;
       pos_counter = 0;
-      Serial.println("time_ms,top_angle,bottom_angle");
+      SerialDebug.println("time_ms,top_angle,bottom_angle");
 
     }
     else{
@@ -435,39 +432,42 @@ void recordData(char* cmd){
     }
   }
   else{
-    Serial.println("Usage: I <(0 for disable, 1 for enable)>");
+    SerialDebug.println("Usage: I <(0 for disable, 1 for enable)>");
   }
 }
 
 void powerCheck(){
   //System Total Voltage Rule
   if(voltage_sys > VOLT_SYS_MAX){
-    //Map to actual enable pin later.
-    Serial.println("\n\n!!! VOLT_SYS_MAX EXCEEDED! !!!\n\n");
+    //Add code to un-safe shut-off system (I.e. ALL lines cutoff)
+    SerialDebug.println("\n\n!!! VOLT_SYS_MAX EXCEEDED! !!!\n\n");
   }
   
   //System Total Current Rule
   if(current_sys > CURR_SYS_MAX){
-    //Map to actual enable pin later.
-    Serial.println("\n\n!!! CURR_SYS_MAX EXCEEDED! !!!\n\n");
+    //Add code to un-safe shut-off system (I.e. ALL lines cutoff)
+    SerialDebug.println("\n\n!!! CURR_SYS_MAX EXCEEDED! !!!\n\n");
   }
   
   //12V Rail Current Rule
   if(current_12V > CURR_12V_MAX){
-    //Map to actual enable pin later.
-    Serial.println("\n\n!!! CURR_12V_MAX EXCEEDED! !!!\n\n");
+    ///Add code to disable 12V Rail (Motors mainly)
+    motorBottom.disable();
+    motorTop.disable();
+    SerialDebug.println("\n\n!!! CURR_12V_MAX EXCEEDED! !!!\n\n");
   }
 
-  //12V Rail Current Rule
+  //5V Rail Current Rule
   if(current_5V > CURR_5V_MAX){
-    //Map to actual enable pin later.
-    Serial.println("\n\n!!! CURR_5V_MAX EXCEEDED! !!!\n\n");
+    //Add code to disable 5V Rail (CM5, etc.)
+    SerialDebug.println("\n\n!!! CURR_5V_MAX EXCEEDED! !!!\n\n");
   }
 
-  //12V Rail Current Rule
+  //3.3V Rail Current Rule
   if(current_3V3 > CURR_3V3_MAX){
     //Map to actual enable pin later.
-    Serial.println("\n\n!!! CURR_3V3_MAX EXCEEDED! !!!\n\n");
+    //Add code to disable 3.3V Rail (SSD, etc.)
+    SerialDebug.println("\n\n!!! CURR_3V3_MAX EXCEEDED! !!!\n\n");
   }
   
   //Top and Bottom Motor Current Rule
@@ -475,11 +475,117 @@ void powerCheck(){
     motorBottom.disable();
     motorTop.disable();
     //Map to actual enable pin(s) later.
-    Serial.println("\n\n!!! MOTOR CURRENT MAX(S) EXCEEDED! !!!\n\n");
+    SerialDebug.println("\n\n!!! MOTOR CURRENT MAX(S) EXCEEDED! !!!\n\n");
   }
 }
 
+//Pin Configurations (STM32 ONLY)
+void configureDigitalInputs() {
+  pinMode(EXT_INT, INPUT);
+  pinMode(YAW_nFAULT, INPUT);
+  pinMode(PITCH_nFAULT, INPUT);
+  pinMode(CM_TO_STM, INPUT);
+  pinMode(PG_3_3V, INPUT);
+  pinMode(PG_12V, INPUT);
+  pinMode(PG_5V, INPUT);
+}
 
+void configureAnalogInputs() {
+  // Optional in STM32duino, but OK for readability
+  pinMode(ADC_eFUSE_V, INPUT_ANALOG);
+  pinMode(ADC_eFUSE_I, INPUT_ANALOG);
+  pinMode(ADC_5V, INPUT_ANALOG);
+  pinMode(ADC_12V, INPUT_ANALOG);
+  pinMode(ADC_3_3V, INPUT_ANALOG);
+  pinMode(ADC_PITCH_RS3, INPUT_ANALOG);
+  pinMode(ADC_PITCH_RS2, INPUT_ANALOG);
+  pinMode(ADC_PITCH_RS1, INPUT_ANALOG);
+  pinMode(ADC_YAW_RS1, INPUT_ANALOG);
+  pinMode(ADC_YAW_RS2, INPUT_ANALOG);
+  pinMode(ADC_YAW_RS3, INPUT_ANALOG);
+}
+
+void configureOutputsSafe() {
+  pinMode(YAW_EN, OUTPUT);
+  pinMode(YAW_nSLEEP, OUTPUT);
+  pinMode(YAW_nRESET, OUTPUT);
+  pinMode(PITCH_EN, OUTPUT);
+  pinMode(PITCH_nSLEEP, OUTPUT);
+  pinMode(STM_TO_CM, OUTPUT);
+  pinMode(STM_STAT, OUTPUT);
+  pinMode(EN_12V, OUTPUT);
+  pinMode(PITCH_nRESET, OUTPUT);
+  pinMode(EN_5V, OUTPUT);
+
+  // Safe startup states:
+  // Keep power rails and motor drivers disabled until firmware is ready.
+  digitalWrite(YAW_EN, LOW);
+  digitalWrite(PITCH_EN, LOW);
+  digitalWrite(EN_12V, LOW);
+  digitalWrite(EN_5V, LOW);
+
+  // Active-low reset/sleep lines held LOW for safety
+  digitalWrite(YAW_nSLEEP, LOW);
+  digitalWrite(YAW_nRESET, LOW);
+  digitalWrite(PITCH_nSLEEP, LOW);
+  digitalWrite(PITCH_nRESET, LOW);
+
+  // Communication/status outputs default low
+  digitalWrite(STM_TO_CM, LOW);
+  digitalWrite(STM_STAT, LOW);
+}
+
+void configurePWMOutputs() {
+  pinMode(YAW_IN1, OUTPUT);
+  pinMode(YAW_IN2, OUTPUT);
+  pinMode(YAW_IN3, OUTPUT);
+  pinMode(PITCH_IN1, OUTPUT);
+  pinMode(PITCH_IN2, OUTPUT);
+  pinMode(PITCH_IN3, OUTPUT);
+
+  // Start with PWM off
+  analogWrite(YAW_IN1, 0);
+  analogWrite(YAW_IN2, 0);
+  analogWrite(YAW_IN3, 0);
+  analogWrite(PITCH_IN1, 0);
+  analogWrite(PITCH_IN2, 0);
+  analogWrite(PITCH_IN3, 0);
+}
+
+void releaseDrivers() {
+  // Call this only after system checks pass
+  digitalWrite(YAW_nRESET, HIGH);
+  digitalWrite(YAW_nSLEEP, HIGH);
+  digitalWrite(PITCH_nRESET, HIGH);
+  digitalWrite(PITCH_nSLEEP, HIGH);
+}
+
+void enablePowerRails() {
+  digitalWrite(EN_5V, HIGH);
+  delay(POWER_STAGE_TIME);
+  digitalWrite(EN_12V, HIGH);
+}
+
+void enableMotorDrivers() {
+  digitalWrite(YAW_EN, HIGH);
+  digitalWrite(PITCH_EN, HIGH);
+}
+
+
+void initUARTs() {
+  SerialCM.setRx(PA3);
+  SerialCM.setTx(PA2);
+  SerialCM.begin(115200);
+
+  SerialDebug.setTx(PC10);
+  SerialDebug.setRx(PC11);
+  SerialDebug.begin(115200);
+
+  delay(50);
+
+  SerialDebug.println("Debug UART ready");
+  SerialCM.println("CM UART ready");
+}
 
 
 //---------------------------------------
@@ -487,16 +593,23 @@ void powerCheck(){
 //---------------------------------------
 
 void setup() {
-
+  
+  //SystemClock_Config();
   #if defined(ARDUINO_ARCH_STM32)
+  initUARTs();
   TwoWire BottomWire(YAW_SDA_Pin, YAW_SCL_Pin);
   TwoWire TopWire(PITCH_SDA_Pin, PITCH_SCL_Pin);
-  SystemClock_Config();
+  //SystemClock_Config();
+  configureDigitalInputs(); 
+  configureAnalogInputs();
+  configureOutputsSafe();
+  configurePWMOutputs();
+  releaseDrivers();
+  enablePowerRails();
   #endif
 
-  Serial.begin(115200);
   SimpleFOCDebug::enable(&Serial);
-  Serial.println(F("=== 2D Gimbal Initializing ==="));
+  SerialDebug.println(F("=== 2D Gimbal Initializing ==="));
 
   // -------------------------------------------------
   // Initialize sensors - COMMENT OUT CODE BLOCKS
@@ -504,19 +617,19 @@ void setup() {
 
   //
   #if defined(ARDUINO_ARCH_STM32)
-      Serial.println(F("Init bottom sensor (BottomWire)..."));
+      SerialDebug.println(F("Init bottom sensor (BottomWire)..."));
       BottomWire.begin();
       sensorBottom.init(&BottomWire);
 
-      Serial.println(F("Init top sensor (TopWire)..."));
+      SerialDebug.println(F("Init top sensor (TopWire)..."));
       TopWire.begin();
       sensorTop.init(&TopWire);
   #else
-      Serial.println(F("Init bottom sensor (Wire)..."));
+      SerialDebug.println(F("Init bottom sensor (Wire)..."));
       Wire.begin();
       sensorBottom.init(&Wire);
 
-      Serial.println(F("Init top sensor (Wire1)..."));
+      SerialDebug.println(F("Init top sensor (Wire1)..."));
       Wire1.begin();
       sensorTop.init(&Wire1);
   #endif
@@ -530,7 +643,7 @@ void setup() {
 
   //Check if valid settings save in memory. If not, load defaults.
   if(!settings_load(settings)){
-    Serial.println("No valid settings... Loading defaults.");
+    SerialDebug.println("No valid settings... Loading defaults.");
 
      // Default PID values
     settings.bottom_p = 0.01;
@@ -557,7 +670,7 @@ void setup() {
   // -------------------------------------------------
   // Bottom Motor Setup (Pan/Yaw)
   // -------------------------------------------------
-  Serial.println(F("--- Bottom Motor (Pan) ---"));
+  SerialDebug.println(F("--- Bottom Motor (Pan) ---"));
   motorBottom.linkSensor(&sensorBottom);
 
   driverBottom.voltage_power_supply = 12;
@@ -587,7 +700,7 @@ void setup() {
   // -------------------------------------------------
   // Top Motor Setup (Tilt/Pitch)
   // -------------------------------------------------
-  Serial.println(F("--- Top Motor (Tilt) ---"));
+  SerialDebug.println(F("--- Top Motor (Tilt) ---"));
   motorTop.linkSensor(&sensorTop);
 
   driverTop.voltage_power_supply = 12;
@@ -640,8 +753,8 @@ void setup() {
   command.add('L', setLPF, "Set LPF: V<motor (0 for bottom, 1 for top)> <seconds>");
   command.add('S', saveSettings, "Save Settings: S <PID(0|1)> <Velocity(0|1)> <Home(0|1)>");
 
-  Serial.println(F("=== 2D Gimbal Ready ==="));
-  Serial.println(F("ATTENTION: Motors initialized as disabled!"));
+  SerialDebug.println(F("=== 2D Gimbal Ready ==="));
+  SerialDebug.println(F("ATTENTION: Motors initialized as disabled!"));
   _delay(1000);
 }
   
@@ -653,6 +766,8 @@ void setup() {
 
 void loop() {
 
+  SerialDebug.println("Hello! This is working.");
+  delay(500);
   // Run FOC for both motors
   motorBottom.loopFOC();
   motorTop.loopFOC();
@@ -667,14 +782,29 @@ void loop() {
       pos_last_time += 10;
       pos_counter += 10;
 
-      Serial.print(",");
-      Serial.print(pos_counter);                   // time
-      Serial.print(",");
-      Serial.print(motorTop.shaftAngle(), 3);  // top motor
-      Serial.print(",");
-      Serial.println(motorBottom.shaftAngle(), 3); // bottom motor
+      SerialDebug.print(",");
+      SerialDebug.print(pos_counter);                   // time
+      SerialDebug.print(",");
+      SerialDebug.print(motorTop.shaftAngle(), 3);  // top motor
+      SerialDebug.print(",");
+      SerialDebug.println(motorBottom.shaftAngle(), 3); // bottom motor
     }
   }
+
+
+  //ADC
+  current_sys = systemCurrent(digitalRead(PA1));
+  voltage_sys = systemVoltage(digitalRead(PA0));
+  power_sys = current_sys * voltage_sys;
+  current_3V3 = currentSense(digitalRead(PC2), 0.0015);
+  current_5V = currentSense(digitalRead(PC0), 0.0015);
+  current_12V = currentSense(digitalRead(PC1), 0.0015);
+  current_BP1 = currentSense(digitalRead(PA4), 0.0100);
+  current_TP1 = currentSense(digitalRead(PC5), 0.0100);
+  current_BP2 = currentSense(digitalRead(PA5), 0.0100);
+  current_TP2 = currentSense(digitalRead(PC4), 0.0100);
+  current_BP3 = currentSense(digitalRead(PA6), 0.0100);
+  current_TP3 = currentSense(digitalRead(PC3), 0.0100);
 
   //Check the power values of the current and voltage lines at a rate of ~75hz.
   if(checkPower){
@@ -684,38 +814,6 @@ void loop() {
       powerCheck();
     }
   }
-
-
-
-
-  // //ANTHONY'S SHIT
-  // pinMode()
-  // digitalWrite()
-  // digitalRead()
-
-  //ADC
-  // current_sys = systemCurrent(digitalRead(PA1));
-  // voltage_sys = systemVoltage(digitalRead(PA0));
-  // power_sys = current_sys * voltage_sys
-  // current_3V3 = currentSense(digitalRead(PC2), 0.0015);
-  // current_5V = currentSense(digitalRead(PC0), 0.0015);
-  // current_12V = currentSense(digitalRead(PC1), 0.0015);
-  // current_BP1 = currentSense(digitalRead(PA4), 0.0100);
-  // current_TP1 = currentSense(digitalRead(PC5), 0.0100);
-  // current_BP2 = currentSense(digitalRead(PA5), 0.0100);
-  // current_TP2 = currentSense(digitalRead(PC4), 0.0100);
-  // current_BP3 = currentSense(digitalRead(PA6), 0.0100);
-  // current_TP3 = currentSense(digitalRead(PC3), 0.0100);
-
-  //Inputs
-
-  //Outputs
-
-  //I2C
-
-  //UART
-
-  //USB
 
 
   // Serial command processing

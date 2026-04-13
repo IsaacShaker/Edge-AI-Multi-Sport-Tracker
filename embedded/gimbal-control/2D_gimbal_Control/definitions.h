@@ -46,12 +46,74 @@ POWER TELEMETRY PINOUTS
 POWER SAFETY THRESHOLDS
 */
 
-#define VOLT_SYS_MAX    15
-#define CURR_SYS_MAX    15
-#define CURR_12V_MAX    15
-#define CURR_5V_MAX     15
-#define CURR_3V3_MAX    15
-#define CURR_PHASE_MAX  2
+#define POWER_STAGE_TIME 1000
+#define VOLT_SYS_MAX    15.12f  // 14.4V Nominal + 10% MoE
+#define CURR_SYS_MAX    10      // 10A Max Total System Power
+#define CURR_12V_MAX    4.4f    // 2A Max / Motor Max Total + 10% MoE
+#define CURR_5V_MAX     4.4f    
+#define CURR_3V3_MAX    2.2f    
+#define CURR_PHASE_MAX  2.2f    // 2A Max / Phase + 10% MoE
+
+/**
+PIN ASSIGNMENTS FOR STM32
+*/
+
+//Interrupt / Fault / Status inputs
+#define EXT_INT         PC13
+#define YAW_nFAULT      PC14
+#define PITCH_nFAULT    PB14
+#define CM_TO_STM       PA9
+#define PG_3_3V         PC12
+#define PG_12V          PD2
+#define PG_5V           PB8
+
+//Output control pins
+#define YAW_EN          PC15
+#define YAW_nSLEEP      PB2
+#define YAW_nRESET      PB12
+#define PITCH_EN        PB13
+#define PITCH_nSLEEP    PB15
+#define STM_TO_CM       PA10
+#define STM_STAT        PA15
+#define EN_12V          PB4
+#define PITCH_nRESET    PB5
+#define EN_5V           PB9
+
+//ADC inputs
+#define ADC_eFUSE_V     PA0
+#define ADC_eFUSE_I     PA1
+#define ADC_5V          PC0
+#define ADC_12V         PC1
+#define ADC_3_3V        PC2
+#define ADC_PITCH_RS3   PC3
+#define ADC_PITCH_RS2   PC4
+#define ADC_PITCH_RS1   PC5
+#define ADC_YAW_RS1     PA4
+#define ADC_YAW_RS2     PA5
+#define ADC_YAW_RS3     PA6
+
+//PWM outputs
+#define YAW_IN1         PA7   // TIM3_CH2
+#define YAW_IN2         PB0   // TIM3_CH3
+#define YAW_IN3         PB1   // TIM3_CH4
+#define PITCH_IN1       PC6   // TIM8_CH1
+#define PITCH_IN2       PC7   // TIM8_CH2
+#define PITCH_IN3       PC8   // TIM8_CH3
+
+//UART pins
+#define STM_TX_CM_RX    PA2   // USART2_TX
+#define STM_RX_CM_TX    PA3   // USART2_RX
+#define DEBUG_TX        PC10  // USART3_TX
+#define DEBUG_RX        PC11  // USART3_RX
+
+//I2C pins
+#define PITCH_SCL       PB6   // I2C1_SCL
+#define PITCH_SDA       PB7   // I2C1_SDA
+#define YAW_SCL         PB10  // I2C2_SCL
+#define YAW_SDA         PB3   // I2C2_SDA
+#define CM_SCL          PA8   // I2C3_SCL
+#define CM_SDA          PC9   // I2C3_SDA
+
 
 /**
 PRIVATE DEFINES
