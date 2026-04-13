@@ -1,6 +1,6 @@
 #include <Arduino.h>
 
-#ifndef MY_HEADER_H // Header guard
+#ifndef MY_HEADER_H // header guard
 #define MY_HEADER_H
 
 //---------------------------------------
@@ -24,6 +24,7 @@
 #define CURR_5V_MAX         4.4f    
 #define CURR_3V3_MAX        2.2f    
 #define CURR_PHASE_MAX      2.2f    // 2A Max / Phase + 10% MoE
+
 
 //---------------------------------------
 // PIN ASSIGNMENTS FOR STM32F412RET6TR
@@ -191,5 +192,5 @@
 // #define EN_5V_Pin GPIO_PIN_9
 // #define EN_5V_GPIO_Port GPIOB
 
-#endif // MY_HEADER_H
+#endif  // end header guard
 
