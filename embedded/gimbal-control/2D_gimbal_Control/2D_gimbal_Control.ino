@@ -8,11 +8,61 @@
 #include "gimbal_settings.h"
 #include "power_telemetry.h"
 
+
 //---------------------------------------
-//    CLOCK CONFIGURATION (only done on STM32F412RET6TR)
+//    CONTROL VARIABLES
 //---------------------------------------
 
-extern "C" void SystemClock_Config(void) {
+// --- Motor Movement Limits ---
+float target_angle_bottom = 0;        // pan/yaw target (radians)
+float target_angle_top = 0;           // tilt/pitch target (radians)
+
+float target_angle_bottom_min = 1.5;  // pan/yaw target angle minimum
+float target_angle_bottom_max = 3.5;  // pan/yaw target angle maximum
+float target_angle_top_min = -5.0;    // tilt/pitch target angle minimum
+float target_angle_top_max = -3.0;    // tilt/pitch target angle maximum
+
+float home_angle_bottom = 0;          // pan/yaw target (radians) defualt
+float home_angle_top = 0;             // tilt/pitch target (radians) default
+
+// --- Positional Telemetry ---
+bool returnPosition = false;          // position Logging (Serial)
+unsigned long pos_last_time = 0;
+uint32_t pos_counter = 0;
+
+// --- Power Telemetry ---
+bool checkPower = false;              // power Safety
+unsigned long pow_last_time = 0;
+uint32_t pow_counter = 0;
+
+bool returnPower = false;             // power Return
+
+float current_sys = 0;
+float power_sys = 0;
+float voltage_sys = 0;
+float current_12V = 0;
+float current_5V = 0;
+float current_3V3 = 0;
+float current_BP1 = 0;
+float current_TP1 = 0;
+float current_BP2 = 0;
+float current_TP2 = 0;
+float current_BP3 = 0;
+float current_TP3 = 0;
+
+bool bottom_fault = 0;
+bool top_fault = 0;
+
+// --- Microcontroller Status ---
+unsigned long stm_last_time = 0;
+uint32_t stm_counter = 0;
+
+//---------------------------------------
+//    CLOCK CONFIGURATION 
+//    (only done on STM32F412RET6TR)
+//---------------------------------------
+
+extern "C" void SystemClock_Config(void){
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
@@ -27,9 +77,10 @@ extern "C" void SystemClock_Config(void) {
   RCC_OscInitStruct.PLL.PLLN = 192;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 4;
-#if defined(RCC_PLLR_SUPPORT)
-  RCC_OscInitStruct.PLL.PLLR = 2;
-#endif
+
+  #if defined(RCC_PLLR_SUPPORT)
+    RCC_OscInitStruct.PLL.PLLR = 2;
+  #endif
 
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
     while (1) {}
@@ -48,17 +99,17 @@ extern "C" void SystemClock_Config(void) {
     while (1) {}
   }
 
-  // Make sure the global clock variable is updated
-  SystemCoreClockUpdate();
+  SystemCoreClockUpdate();  // assure global clock variable is updated
 }
 
 
 //---------------------------------------
 //    SERIAL DEBUG
 //---------------------------------------
-HardwareSerial SerialCM(USART2);
-HardwareSerial SerialDebug(USART3);
+
 #define Serial SerialDebug
+HardwareSerial SerialCM(USART2);      // STM and CM UART
+HardwareSerial SerialDebug(USART3);   // debug UART
 
 
 //---------------------------------------
@@ -68,75 +119,37 @@ HardwareSerial SerialDebug(USART3);
 MagneticSensorI2C sensorBottom = MagneticSensorI2C(AS5600_I2C);
 MagneticSensorI2C sensorTop = MagneticSensorI2C(AS5600_I2C);
 
+
 //---------------------------------------
 //    MOTOR & DRIVER CONFIGURATION
 //---------------------------------------
 
 // --- Bottom Motor (Pan/Yaw) ---
 BLDCMotor motorBottom = BLDCMotor(POLE_PAIRS, PHASE_RESISTANCE, KV_RATING, Q_INDUCTANCE);
-BLDCDriver3PWM driverBottom = BLDCDriver3PWM(B_PH1, B_PH2, B_PH3, B_EN);  // PWM pins + enable
+BLDCDriver3PWM driverBottom = BLDCDriver3PWM(YAW_IN1, YAW_IN2, YAW_IN3, YAW_EN);  // PWM pins + enable
 
 // --- Top Motor (Tilt/Pitch) ---
 BLDCMotor motorTop = BLDCMotor(POLE_PAIRS, PHASE_RESISTANCE, KV_RATING, Q_INDUCTANCE);
-BLDCDriver3PWM driverTop = BLDCDriver3PWM(T_PH1, T_PH2 , T_PH3, T_EN);  // PWM pins + enable
+BLDCDriver3PWM driverTop = BLDCDriver3PWM(PITCH_IN1, PITCH_IN2 , PITCH_IN3, PITCH_EN);  // PWM pins + enable
 
-//---------------------------------------
-//    CONTROL VARIABLES
-//---------------------------------------
-
-
-//Motor Movement Limits
-float target_angle_bottom = 0;  // pan/yaw target (radians)
-float target_angle_top = 0;     // tilt/pitch target (radians)
-
-float target_angle_bottom_min = 1.5; // pan/yaw target angle minimum
-float target_angle_bottom_max = 3.5; // pan/yaw target angle maximum
-float target_angle_top_min = -5.0; // tilt/pitch target angle minimum
-float target_angle_top_max = -3.0; // tilt/pitch target angle maximum
-
-float home_angle_bottom = 0;  // pan/yaw target (radians) defualt
-float home_angle_top = 0;     // tilt/pitch target (radians) default
-
-//Positional Telemetry
-bool returnPosition = false; //Position Logging (Serial)
-unsigned long pos_last_time = 0;
-uint32_t pos_counter = 0;
-
-/*
-Power Telemetry
-*/
-bool checkPower = false; //Power Safety
-unsigned long pow_last_time = 0;
-uint32_t pow_counter = 0;
-
-bool returnPower = false; //Power Return
-
-float current_sys = 0;
-float power_sys = 0;
-float voltage_sys = 0;
-float current_12V = 0;
-float current_5V = 0;
-float current_3V3 = 0;
-float current_BP1 = 0;
-float current_TP1 = 0;
-float current_BP2 = 0;
-float current_TP2 = 0;
-float current_BP3 = 0;
-float current_TP3 = 0;
 
 //---------------------------------------
 //    MEMORY SETTINGS
 //---------------------------------------
-Settings settings;  //Instatiate the gimbal settings.
+
+Settings settings;  // instantiate the gimbal settings.
+
 
 //---------------------------------------
 //    COMMANDER (Serial Interface)
 //---------------------------------------
+
 Commander command = Commander(SerialDebug);
 
-/**
- * MOTOR MOVEMENT COMMANDS
- */
+
+//---------------------------------------
+//    MOTOR MOVEMENT COMMANDS
+//---------------------------------------
 
 float checkBounds(int motor, float angle_in){
   if(motor == 0){
@@ -150,13 +163,12 @@ float checkBounds(int motor, float angle_in){
   return angle_in;
 }
 
-
-void doTargetBottom(char* cmd) {
+void doTargetBottom(char* cmd){
   command.scalar(&target_angle_bottom, cmd);
   float target, relative;
-  //If relative (second variable), is enabled (1), then offset the current location.
-  //else, send non-relative location offset.
-  if (sscanf(cmd, "%f %f", &target, &relative) == 2) {
+  // if relative (second variable), is enabled (1), then offset the current location.
+  // else, send non-relative location offset.
+  if(sscanf(cmd, "%f %f", &target, &relative) == 2){
     if(relative == 1){
       target_angle_bottom = checkBounds(0, (fmod(motorBottom.shaftAngle() + target, 6.28f)));
     }
@@ -169,46 +181,44 @@ void doTargetBottom(char* cmd) {
   }
 }
 
-void doTargetTop(char* cmd) {
+void doTargetTop(char* cmd){
   command.scalar(&target_angle_top, cmd);
   float target, relative;
-  //If relative (second variable), is enabled (1), then offset the current location.
-  //else, send non-relative location offset.
-  if (sscanf(cmd, "%f %f", &target, &relative) == 2) {
+  // if relative (second variable), is enabled (1), then offset the current location.
+  // else, send non-relative location offset.
+  if(sscanf(cmd, "%f %f", &target, &relative) == 2){
     if(relative == 1){
       target_angle_top = checkBounds(1, (fmod(motorTop.shaftAngle() + target, 6.28f)));
     }
     else{
       target_angle_top = checkBounds(1, (fmod(target, 6.28f)));
     }
-    
   }
   else{
     SerialDebug.println("Usage: T<angle> <relative?>  (e.g., B1.0 1)");
   }
 }
 
-
-// Move both motors at once: expects "pan_angle tilt_angle"
-void doTargetBoth(char* cmd) {
-  // Parse two floats from the command string
+void doTargetBoth(char* cmd){
+  // parse two floats from the command string
   float pan, tilt;
-  if (sscanf(cmd, "%f %f", &pan, &tilt) == 2) {
+  if(sscanf(cmd, "%f %f", &pan, &tilt) == 2){
     target_angle_bottom = checkBounds(0, pan);
     target_angle_top = checkBounds(1, tilt);
-  } else {
+  }
+  else{
     SerialDebug.println("Usage: M<pan> <tilt>  (e.g., M1.57 0.5)");
   }
 }
 
-void homeMotors(char* cmd) {
+void homeMotors(char* cmd){
   target_angle_top = settings.top_home;
   target_angle_bottom = settings.bottom_home;
 }
 
 void lock_motors(char* cmd){
   float enableMotor;
-  if (sscanf(cmd, "%f", &enableMotor) == 1){
+  if(sscanf(cmd, "%f", &enableMotor) == 1){
     if(enableMotor){
       motorBottom.enable();
       motorTop.enable();
@@ -226,18 +236,17 @@ void lock_motors(char* cmd){
 }
 
 
+//---------------------------------------
+//    SETTINGS ADJUSTMENT COMMANDS
+//---------------------------------------
 
-/**
- *  Settings Adjustment Commands
- */
-
-//Set velocity of either motors in single command.
-void setVelocity(char* cmd) {
-  //Get the position in radians of the bottom and top motor encoders.
+// Set velocity of either motors in single command.
+void setVelocity(char* cmd){
+  // Get the position in radians of the bottom and top motor encoders.
   float velocity, motor;
 
-  //Motor = Input1, Velocity = Input2
-  if (sscanf(cmd, "%f %f", &motor, &velocity) == 2) {
+  // input 1 = motor, input 2 = velocity
+  if(sscanf(cmd, "%f %f", &motor, &velocity) == 2){
     if(motor == 1){
       motorTop.velocity_limit = velocity;
       SerialDebug.print("Top Motor ");
@@ -248,18 +257,18 @@ void setVelocity(char* cmd) {
     }
     SerialDebug.print("Velocity (Rad/s): "); SerialDebug.println(velocity, 3);
   }
-
   else{
     SerialDebug.println("Usage: V <motor (0 for bottom, 1 for top)> <velocity (rad/s)>");
   }
 }
 
-void bSetPID(char* cmd) {
-  //parse three floats from cmd, map to P, I, D.
+// Set PID of the bottom motor.
+void bSetPID(char* cmd){
+  // Parse three floats from cmd, map to P, I, D.
   float bP, bI, bD;
 
-  //If exists, set bottom P, I, D.
-  if (sscanf(cmd, "%f %f %f", &bP, &bI, &bD) == 3) {
+  // If exists, set bottom P, I, D.
+  if(sscanf(cmd, "%f %f %f", &bP, &bI, &bD) == 3){
     motorBottom.PID_velocity.P = bP;
     motorBottom.PID_velocity.I= bI;
     motorBottom.PID_velocity.D = bD;
@@ -268,18 +277,18 @@ void bSetPID(char* cmd) {
     SerialDebug.print(" | bottom I: "); SerialDebug.print(bI, 3);
     SerialDebug.print(" | bottom D: "); SerialDebug.println(bD, 3);
   } 
-  else {
+  else{
     SerialDebug.println("Usage: Bconfig <P> <I> <D>");
   }
 }
 
-
-void tSetPID(char* cmd) {
-  //parse three floats from cmd, map to P, I, D.
+// Set PID of the top motor.
+void tSetPID(char* cmd){
+  // Parse three floats from cmd, map to P, I, D.
   float tP, tI, tD;
 
-  //If exists, set top P, I, D.
-  if (sscanf(cmd, "%f %f %f", &tP, &tI, &tD) == 3) {
+  // If exists, set top P, I, D.
+  if(sscanf(cmd, "%f %f %f", &tP, &tI, &tD) == 3){
     motorTop.PID_velocity.P = tP;
     motorTop.PID_velocity.I= tI;
     motorTop.PID_velocity.D = tD;
@@ -288,18 +297,18 @@ void tSetPID(char* cmd) {
     SerialDebug.print(" | top I: "); SerialDebug.print(tI, 3);
     SerialDebug.print(" | top D: "); SerialDebug.println(tD, 3);
   } 
-  else {
+  else{
     SerialDebug.println("Usage: Tconfig <P> <I> <D>");
   }
 }
 
-//Set LPF of either motors in single command.
-void setLPF(char* cmd) {
-  //Get the position in radians of the bottom and top motor encoders.
+// Set the LPF of either motors in single command.
+void setLPF(char* cmd){
+  // get the position in radians of the bottom and top motor encoders.
   float seconds, motor;
 
-  //Motor = Input1, Seconds = Input2
-  if (sscanf(cmd, "%f %f", &motor, &seconds) == 2) {
+  // input 1 = motor, input 2 = seconds
+  if(sscanf(cmd, "%f %f", &motor, &seconds) == 2){
     if(motor == 1){
       motorTop.LPF_velocity.Tf = seconds;
       SerialDebug.print("Top Motor ");
@@ -316,20 +325,26 @@ void setLPF(char* cmd) {
   }
 }
 
-void getInfo(char* cmd) {
+
+//---------------------------------------
+//    SHOW/SAVE CURRENT SETTINGS/POSITION
+//---------------------------------------
+
+// --- Display the Current Settings ---
+void getInfo(char* cmd){
   SerialDebug.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
-  //Get the position in radians of the bottom and top motor encoders.
+
+  // Get the position in radians of the bottom and top motor encoders.
   float bottomPos = motorBottom.shaftAngle();
   float topPos = motorTop.shaftAngle();
   SerialDebug.print("Top Position (Rads): "); SerialDebug.print(topPos, 3);
   SerialDebug.print(" | Bottom Position (Rads): "); SerialDebug.println(bottomPos, 3);
 
-  //Return the saved home position.
+  // Return the saved home position.
   SerialDebug.print("Top Home Pos (Rads): "); SerialDebug.print(home_angle_top, 3);
   SerialDebug.print(" | Bottom Home Pos (Rads): "); SerialDebug.println(home_angle_bottom, 3);
 
-
-  //Return the current PID values.
+  // Return the current PID values.
   float tP, tI, tD;
   tP = motorTop.PID_velocity.P;
   tI = motorTop.PID_velocity.I;
@@ -346,7 +361,7 @@ void getInfo(char* cmd) {
   SerialDebug.print(" | bottom I: "); SerialDebug.print(bI, 3);
   SerialDebug.print(" | bottom D: "); SerialDebug.println(bD, 3);
 
-  //return the current velocity limits.
+  // Return the current velocity limits.
   float bV, tV, tLPF, bLPF;
   tV = motorTop.velocity_limit;
   bV = motorBottom.velocity_limit;
@@ -357,16 +372,15 @@ void getInfo(char* cmd) {
   SerialDebug.print("bottom LPF: "); SerialDebug.print(bLPF, 3);
   SerialDebug.print(" | top LPF: "); SerialDebug.println(tLPF, 3);
 
-
   SerialDebug.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
-
 }
 
+// --- Save the Current Settings ---
 void saveSettings(char* cmd){
   float pidSet, vSet, homeSet;
 
-  //input 1 = PID, 2 = velocity, 3 = home
-  if (sscanf(cmd, "%f %f %f", &pidSet, &vSet, &homeSet) == 3) {
+  // input 1 = PID, input 2 = velocity, input 3 = home
+  if(sscanf(cmd, "%f %f %f", &pidSet, &vSet, &homeSet) == 3){
     bool savedPID = false;
     bool savedV = false;
     bool savedHome = false;
@@ -381,42 +395,38 @@ void saveSettings(char* cmd){
 
       savedPID = true;
     }
+
     if(vSet == 1){
       settings.top_vlimit = motorTop.velocity_limit;
       settings.bottom_vlimit = motorBottom.velocity_limit;
       settings.top_lpf = motorTop.LPF_velocity.Tf;
       settings.bottom_lpf = motorBottom.LPF_velocity.Tf;
       savedV = true;
-
     }
+
     if(homeSet == 1){
       settings.bottom_home = motorBottom.shaftAngle();
       settings.top_home = motorTop.shaftAngle();
       savedHome = true;
     }
+    
     settings_save(settings);
 
-    // ---- Return Message ----
+    // Return Message
     SerialDebug.print("SAVE OK | ");
 
-    if (savedPID)  SerialDebug.print("PID ");
-    if (savedV)  SerialDebug.print("VEL ");
-    if (savedHome) SerialDebug.print("HOME ");
+    if(savedPID) SerialDebug.print("PID ");
+    if(savedV) SerialDebug.print("VEL ");
+    if(savedHome) SerialDebug.print("HOME ");
 
     SerialDebug.println();
   }
-  else {
+  else{
     SerialDebug.println("SAVE ERROR | Usage: S<pid> <vel> <home>  (ex: S1 0 1)");
   }
 }
 
-
-
-
-/**
- * Telemetry
- */
-
+// --- Positional Telemetry ---
 void recordData(char* cmd){
   float recordData;
   if (sscanf(cmd, "%f", &recordData) == 1){
@@ -425,7 +435,6 @@ void recordData(char* cmd){
       pos_last_time = 0;
       pos_counter = 0;
       SerialDebug.println("time_ms,top_angle,bottom_angle");
-
     }
     else{
       returnPosition = false;
@@ -436,50 +445,88 @@ void recordData(char* cmd){
   }
 }
 
+//---------------------------------------
+//    POWER CHECK
+//---------------------------------------
+
 void powerCheck(){
-  //System Total Voltage Rule
+
+  // System Total Voltage Rule
   if(voltage_sys > VOLT_SYS_MAX){
-    //Add code to un-safe shut-off system (I.e. ALL lines cutoff)
+    // Un-safe shut-off system.
     SerialDebug.println("\n\n!!! VOLT_SYS_MAX EXCEEDED! !!!\n\n");
+    digitalWrite(EN_12V, LOW);
+    digitalWrite(EN_5V, LOW);
+    digitalWrite(YAW_EN, LOW);
+    digitalWrite(PITCH_EN, LOW);
   }
   
-  //System Total Current Rule
+  // System Total Current Rule
   if(current_sys > CURR_SYS_MAX){
-    //Add code to un-safe shut-off system (I.e. ALL lines cutoff)
+    // Un-safe shut-off system.
     SerialDebug.println("\n\n!!! CURR_SYS_MAX EXCEEDED! !!!\n\n");
+    digitalWrite(EN_12V, LOW);
+    digitalWrite(EN_5V, LOW);
+    digitalWrite(YAW_EN, LOW);
+    digitalWrite(PITCH_EN, LOW);
   }
   
-  //12V Rail Current Rule
+  // 12V Rail Current Rule
   if(current_12V > CURR_12V_MAX){
-    ///Add code to disable 12V Rail (Motors mainly)
+    // Un-safe shut-off motors and 12V rail.
+    SerialDebug.println("\n\n!!! CURR_12V_MAX EXCEEDED! !!!\n\n");
     motorBottom.disable();
     motorTop.disable();
-    SerialDebug.println("\n\n!!! CURR_12V_MAX EXCEEDED! !!!\n\n");
+    digitalWrite(YAW_EN, LOW);
+    digitalWrite(PITCH_EN, LOW);
+    digitalWrite(EN_12V, LOW);
+
   }
 
-  //5V Rail Current Rule
+  // 5V Rail Current Rule
   if(current_5V > CURR_5V_MAX){
-    //Add code to disable 5V Rail (CM5, etc.)
+    // Un-safe shut-off 5V rail.
     SerialDebug.println("\n\n!!! CURR_5V_MAX EXCEEDED! !!!\n\n");
+    digitalWrite(EN_5V, LOW);
   }
 
-  //3.3V Rail Current Rule
+  // 3.3V Rail Current Rule
   if(current_3V3 > CURR_3V3_MAX){
-    //Map to actual enable pin later.
-    //Add code to disable 3.3V Rail (SSD, etc.)
+    // Un-safe shut-off system.
     SerialDebug.println("\n\n!!! CURR_3V3_MAX EXCEEDED! !!!\n\n");
+    digitalWrite(EN_12V, LOW);
+    digitalWrite(EN_5V, LOW);
+    digitalWrite(YAW_EN, LOW);
+    digitalWrite(PITCH_EN, LOW);
   }
   
-  //Top and Bottom Motor Current Rule
+  // Top and Bottom Motor Current Rule
   if(((current_BP1 + current_BP2 + current_BP3) > CURR_PHASE_MAX) || ((current_TP1 + current_TP2 + current_TP3) > CURR_PHASE_MAX)){
+    // Disable motors.
+    SerialDebug.println("\n\n!!! MOTOR CURRENT MAX(S) EXCEEDED! !!!\n\n");
     motorBottom.disable();
     motorTop.disable();
-    //Map to actual enable pin(s) later.
-    SerialDebug.println("\n\n!!! MOTOR CURRENT MAX(S) EXCEEDED! !!!\n\n");
+    digitalWrite(YAW_EN, LOW);
+    digitalWrite(PITCH_EN, LOW);
+  }
+
+  // Top and Bottom Motor Fault Detection
+  if(bottom_fault || top_fault){
+    // Disable motors.
+    SerialDebug.println("\n\n!!! MOTOR FAULT DETECTED! !!!\n\n");
+    motorBottom.disable();
+    motorTop.disable();
+    digitalWrite(YAW_EN, LOW);
+    digitalWrite(PITCH_EN, LOW);
   }
 }
 
-//Pin Configurations (STM32 ONLY)
+
+//---------------------------------------
+//    STM32F412RET6TR INPUTS AND OUTPUTS
+//---------------------------------------
+
+// --- Digital Inputs ---
 void configureDigitalInputs() {
   pinMode(EXT_INT, INPUT);
   pinMode(YAW_nFAULT, INPUT);
@@ -490,8 +537,9 @@ void configureDigitalInputs() {
   pinMode(PG_5V, INPUT);
 }
 
+// --- Analog Inputs ---
 void configureAnalogInputs() {
-  // Optional in STM32duino, but OK for readability
+  // Optional in STM32duino, but OK for readability.
   pinMode(ADC_eFUSE_V, INPUT_ANALOG);
   pinMode(ADC_eFUSE_I, INPUT_ANALOG);
   pinMode(ADC_5V, INPUT_ANALOG);
@@ -505,6 +553,7 @@ void configureAnalogInputs() {
   pinMode(ADC_YAW_RS3, INPUT_ANALOG);
 }
 
+// --- Safe Output Initialization ---
 void configureOutputsSafe() {
   pinMode(YAW_EN, OUTPUT);
   pinMode(YAW_nSLEEP, OUTPUT);
@@ -524,17 +573,18 @@ void configureOutputsSafe() {
   digitalWrite(EN_12V, LOW);
   digitalWrite(EN_5V, LOW);
 
-  // Active-low reset/sleep lines held LOW for safety
+  // Active-low reset/sleep lines held LOW for safety.
   digitalWrite(YAW_nSLEEP, LOW);
   digitalWrite(YAW_nRESET, LOW);
   digitalWrite(PITCH_nSLEEP, LOW);
   digitalWrite(PITCH_nRESET, LOW);
 
-  // Communication/status outputs default low
+  // Communication/status outputs default low.
   digitalWrite(STM_TO_CM, LOW);
   digitalWrite(STM_STAT, LOW);
 }
 
+// --- Setup Motor Outputs ---
 void configurePWMOutputs() {
   pinMode(YAW_IN1, OUTPUT);
   pinMode(YAW_IN2, OUTPUT);
@@ -543,7 +593,7 @@ void configurePWMOutputs() {
   pinMode(PITCH_IN2, OUTPUT);
   pinMode(PITCH_IN3, OUTPUT);
 
-  // Start with PWM off
+  // Start with PWM off.
   analogWrite(YAW_IN1, 0);
   analogWrite(YAW_IN2, 0);
   analogWrite(YAW_IN3, 0);
@@ -552,26 +602,36 @@ void configurePWMOutputs() {
   analogWrite(PITCH_IN3, 0);
 }
 
+// --- Enable Driver Chips ---
 void releaseDrivers() {
-  // Call this only after system checks pass
+  // Call this only after system checks pass.
   digitalWrite(YAW_nRESET, HIGH);
   digitalWrite(YAW_nSLEEP, HIGH);
   digitalWrite(PITCH_nRESET, HIGH);
   digitalWrite(PITCH_nSLEEP, HIGH);
 }
 
-void enablePowerRails() {
-  digitalWrite(EN_5V, HIGH);
-  delay(POWER_STAGE_TIME);
-  digitalWrite(EN_12V, HIGH);
-}
-
+// --- Enable Driver Outputs ---
 void enableMotorDrivers() {
   digitalWrite(YAW_EN, HIGH);
   digitalWrite(PITCH_EN, HIGH);
 }
 
+// --- Enable Power Rails ---
+void enablePowerRails() {
+  // Wait for 3.3V rail to go high.
+  while(!digitalRead(PG_3_3V)){
+    delay(POWER_STAGE_TIME);
+    digitalWrite(EN_5V, HIGH);
+  }
+  // Wait for 5V rail to go high.
+  while(!digitalRead(PG_5V)){
+    delay(POWER_STAGE_TIME);
+    digitalWrite(EN_12V, HIGH);
+  }
+}
 
+// --- Initialize CM and Debug UART ---
 void initUARTs() {
   SerialCM.setRx(PA3);
   SerialCM.setTx(PA2);
@@ -589,17 +649,17 @@ void initUARTs() {
 
 
 //---------------------------------------
-//    SETUP
+//    SYSTEM SETUP
 //---------------------------------------
 
 void setup() {
   
-  //SystemClock_Config();
+  SystemClock_Config();
+
   #if defined(ARDUINO_ARCH_STM32)
   initUARTs();
   TwoWire BottomWire(YAW_SDA_Pin, YAW_SCL_Pin);
   TwoWire TopWire(PITCH_SDA_Pin, PITCH_SCL_Pin);
-  //SystemClock_Config();
   configureDigitalInputs(); 
   configureAnalogInputs();
   configureOutputsSafe();
@@ -611,11 +671,8 @@ void setup() {
   SimpleFOCDebug::enable(&Serial);
   SerialDebug.println(F("=== 2D Gimbal Initializing ==="));
 
-  // -------------------------------------------------
-  // Initialize sensors - COMMENT OUT CODE BLOCKS
-  // -------------------------------------------------
 
-  //
+  // --- Initialize Sensors ---
   #if defined(ARDUINO_ARCH_STM32)
       SerialDebug.println(F("Init bottom sensor (BottomWire)..."));
       BottomWire.begin();
@@ -634,18 +691,13 @@ void setup() {
       sensorTop.init(&Wire1);
   #endif
 
-
-
-
-  // -------------------------------------------------
-  // Motor Setup (Pan/Yaw)
-  // -------------------------------------------------
-
-  //Check if valid settings save in memory. If not, load defaults.
+  
+  // --- Motor Settings Setup ---
+  // Check if valid settings save in memory. If not, load defaults.
   if(!settings_load(settings)){
     SerialDebug.println("No valid settings... Loading defaults.");
 
-     // Default PID values
+    // Default PID values
     settings.bottom_p = 0.01;
     settings.bottom_i = 0.0;
     settings.bottom_d = 0.0;
@@ -667,9 +719,7 @@ void setup() {
   }
 
 
-  // -------------------------------------------------
-  // Bottom Motor Setup (Pan/Yaw)
-  // -------------------------------------------------
+  // --- Bottom Motor (Yaw) Setup ---
   SerialDebug.println(F("--- Bottom Motor (Pan) ---"));
   motorBottom.linkSensor(&sensorBottom);
 
@@ -697,9 +747,8 @@ void setup() {
   motorBottom.init();
   motorBottom.initFOC();
 
-  // -------------------------------------------------
-  // Top Motor Setup (Tilt/Pitch)
-  // -------------------------------------------------
+
+  // --- Top Motor (Pitch) Setup ---
   SerialDebug.println(F("--- Top Motor (Tilt) ---"));
   motorTop.linkSensor(&sensorTop);
 
@@ -727,9 +776,8 @@ void setup() {
   motorTop.init();
   motorTop.initFOC();
 
-  // -------------------------------------------------
-  // Motor Inital State Setup
-  // -------------------------------------------------
+
+  // --- Motor Initial State Setup ---
   target_angle_bottom = motorBottom.shaftAngle();
   target_angle_top = motorTop.shaftAngle();
   home_angle_bottom = settings.bottom_home;
@@ -737,9 +785,8 @@ void setup() {
   motorBottom.disable();
   motorTop.disable();
 
-  // -------------------------------------------------
-  // Commander setup
-  // -------------------------------------------------
+
+  // --- Commander Setup ---
   command.add('B', doTargetBottom, "bottom/pan angle (rad), relative?");
   command.add('T', doTargetTop, "top/tilt angle (rad), relative?");
   command.add('M', doTargetBoth, "both: M<pan> <tilt>");
@@ -759,24 +806,32 @@ void setup() {
 }
   
 
-
 //---------------------------------------
 // MAIN LOOP
 //---------------------------------------
 
-void loop() {
+void loop(){
 
   SerialDebug.println("Hello! This is working.");
   delay(500);
-  // Run FOC for both motors
+
+  // --- Toggle Microcontroller Status Pin ---
+  if(millis() - stm_last_time >= 500){
+    stm_last_time += 500;
+    stm_counter += 500;
+    digitalWrite(STM_STAT, !digitalRead(STM_STAT));
+  }
+
+  // --- Run FOC for Both Motors ---
   motorBottom.loopFOC();
   motorTop.loopFOC();
 
-  // Position control updates
+  // --- Position Control Updates ---
   motorBottom.move(target_angle_bottom);
   motorTop.move(target_angle_top);
 
-  // Return positional telemetry every 10ms (if enabled) in CSV format.
+  // --- Return Positional Telemetry ---
+  // Returns every 10ms (if enabled) in CSV format.
   if(returnPosition){
     if (millis() - pos_last_time >= 10) {
       pos_last_time += 10;
@@ -791,22 +846,27 @@ void loop() {
     }
   }
 
-
-  //ADC
-  current_sys = systemCurrent(digitalRead(PA1));
-  voltage_sys = systemVoltage(digitalRead(PA0));
+  // --- Acquire and Process Analog Inputs ---
+  current_sys = systemCurrent(digitalRead(ADC_eFUSE_I));
+  voltage_sys = systemVoltage(digitalRead(ADC_eFUSE_V));
   power_sys = current_sys * voltage_sys;
-  current_3V3 = currentSense(digitalRead(PC2), 0.0015);
-  current_5V = currentSense(digitalRead(PC0), 0.0015);
-  current_12V = currentSense(digitalRead(PC1), 0.0015);
-  current_BP1 = currentSense(digitalRead(PA4), 0.0100);
-  current_TP1 = currentSense(digitalRead(PC5), 0.0100);
-  current_BP2 = currentSense(digitalRead(PA5), 0.0100);
-  current_TP2 = currentSense(digitalRead(PC4), 0.0100);
-  current_BP3 = currentSense(digitalRead(PA6), 0.0100);
-  current_TP3 = currentSense(digitalRead(PC3), 0.0100);
 
-  //Check the power values of the current and voltage lines at a rate of ~75hz.
+  current_3V3 = currentSense(digitalRead(ADC_3_3V), 0.0015);
+  current_5V = currentSense(digitalRead(ADC_5V), 0.0015);
+  current_12V = currentSense(digitalRead(ADC_12V), 0.0015);
+
+  current_BP1 = currentSense(digitalRead(ADC_YAW_RS1), 0.0100);
+  current_BP2 = currentSense(digitalRead(ADC_YAW_RS2), 0.0100);
+  current_BP3 = currentSense(digitalRead(ADC_YAW_RS3), 0.0100);
+  bottom_fault = digitalRead(YAW_nFAULT);
+
+  current_TP1 = currentSense(digitalRead(ADC_PITCH_RS1), 0.0100);
+  current_TP2 = currentSense(digitalRead(ADC_PITCH_RS2), 0.0100);
+  current_TP3 = currentSense(digitalRead(ADC_PITCH_RS3), 0.0100);
+  top_fault = digitalRead(PITCH_nFAULT);
+
+  // --- Check Power Limits ---
+  // Check current and voltage values at a rate of ~75hz.
   if(checkPower){
     if (millis() - pow_last_time >= 13) {
       pow_last_time += 13;
@@ -815,7 +875,6 @@ void loop() {
     }
   }
 
-
-  // Serial command processing
+  // --- Serial Command Processing ---
   command.run();
 }
