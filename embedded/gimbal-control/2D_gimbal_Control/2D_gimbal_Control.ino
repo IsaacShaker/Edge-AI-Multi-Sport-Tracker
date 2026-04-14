@@ -33,8 +33,6 @@ uint32_t pos_counter = 0;
 // --- Power Telemetry ---
 bool checkPower = false;              // power Safety
 unsigned long pow_last_time = 0;
-uint32_t pow_counter = 0;
-
 bool returnPower = false;             // power Return
 
 float current_sys = 0;
@@ -55,7 +53,7 @@ bool top_fault = 0;
 
 // --- Microcontroller Status ---
 unsigned long stm_last_time = 0;
-uint32_t stm_counter = 0;
+
 
 //---------------------------------------
 //    CLOCK CONFIGURATION 
@@ -818,9 +816,8 @@ void loop(){
   delay(500);
 
   // --- Toggle Microcontroller Status Pin ---
-  if(millis() - stm_last_time >= 500){
-    stm_last_time += 500;
-    stm_counter += 500;
+  if(millis() - stm_last_time >= 2000){
+    stm_last_time += 2000;
     digitalWrite(STM_STAT, !digitalRead(STM_STAT));
   }
 
@@ -872,7 +869,6 @@ void loop(){
   if(checkPower){
     if (millis() - pow_last_time >= 13) {
       pow_last_time += 13;
-      pow_counter += 13;
       powerCheck();
     }
   }
