@@ -535,6 +535,7 @@ void configureDigitalInputs() {
   pinMode(PG_3_3V, INPUT);
   pinMode(PG_12V, INPUT);
   pinMode(PG_5V, INPUT);
+  SerialDebug.println(" --- Digital inputs configured! ---\n");
 }
 
 // --- Analog Inputs ---
@@ -551,6 +552,7 @@ void configureAnalogInputs() {
   pinMode(ADC_YAW_RS1, INPUT_ANALOG);
   pinMode(ADC_YAW_RS2, INPUT_ANALOG);
   pinMode(ADC_YAW_RS3, INPUT_ANALOG);
+  SerialDebug.println(" --- Analog inputs configured! ---\n");
 }
 
 // --- Safe Output Initialization ---
@@ -582,6 +584,8 @@ void configureOutputsSafe() {
   // Communication/status outputs default low.
   digitalWrite(STM_TO_CM, LOW);
   digitalWrite(STM_STAT, LOW);
+
+  SerialDebug.println(" --- Outputs configured safely! (DRIVERS NOT ARMED) ---\n");
 }
 
 // --- Setup Motor Outputs ---
@@ -600,6 +604,7 @@ void configurePWMOutputs() {
   analogWrite(PITCH_IN1, 0);
   analogWrite(PITCH_IN2, 0);
   analogWrite(PITCH_IN3, 0);
+  SerialDebug.println(" --- PWM outputs configured! ---\n");
 }
 
 // --- Enable Driver Chips ---
@@ -609,29 +614,46 @@ void releaseDrivers() {
   digitalWrite(YAW_nSLEEP, HIGH);
   digitalWrite(PITCH_nRESET, HIGH);
   digitalWrite(PITCH_nSLEEP, HIGH);
+  SerialDebug.println(" --- Drivers configured! ---\n");
 }
 
 // --- Enable Driver Outputs ---
 void enableMotorDrivers() {
   digitalWrite(YAW_EN, HIGH);
+  delay(1500);
   digitalWrite(PITCH_EN, HIGH);
+  delay(1500);
+  SerialDebug.println("----- Motor drivers enabled! -----");
+
 }
 
 // --- Enable Power Rails ---
 void enablePowerRails() {
-  // // Wait for 3.3V rail to go high.
-  // while(!digitalRead(PG_3_3V)){
-  //   delay(POWER_STAGE_TIME);
-  //   digitalWrite(EN_5V, HIGH);
-  // }
-  // // Wait for 5V rail to go high.
-  // while(!digitalRead(PG_5V)){
-  //   delay(POWER_STAGE_TIME);
-  //   digitalWrite(EN_12V, HIGH);
-  // }
+  SerialDebug.println(" --- Power rails staging... ---");
+  // Wait for 3.3V rail to go high.
+  while(!digitalRead(PG_3_3V)){
+    digitalRead(PG_3_3V);
+  }
+  SerialDebug.println("\n3.3V RAIL GOOD");
+  delay(POWER_STAGE_TIME);
   digitalWrite(EN_5V, HIGH);
+
+  // Wait for 5V rail to go high.
+  while(!digitalRead(PG_5V)){
+    digitalRead(PG_5V);
+  }
+  SerialDebug.println("5V RAIL GOOD");
   delay(POWER_STAGE_TIME);
   digitalWrite(EN_12V, HIGH);
+
+  // Wait for 12V rail to go high.
+  while(!digitalRead(PG_12V)){
+    digitalRead(PG_12V);
+  }
+  SerialDebug.println("12V RAIL GOOD\n");
+
+  // All rails good.
+  SerialDebug.println(" --- Power rails staged! ---");
 
 }
 
@@ -639,18 +661,45 @@ void enablePowerRails() {
 void initUARTs() {
   SerialCM.setRx(PA3);
   SerialCM.setTx(PA2);
+  delay(3000);
   SerialCM.begin(115200);
 
   SerialDebug.setTx(PC10);
   SerialDebug.setRx(PC11);
+  delay(3000);
   SerialDebug.begin(115200);
 
-  delay(50);
 
-  SerialDebug.println("Debug UART ready");
-  SerialCM.println("CM UART ready");
+  SerialDebug.println("--- Debug UART ready! ---");
+  SerialCM.println("--- CM UART ready! ---");
 }
 
+static void printClockInfo() {
+  SerialDebug.println("----- Clock Info -----");
+
+  SerialDebug.print("HSE_VALUE: ");
+  SerialDebug.println(HSE_VALUE);
+
+  SerialDebug.print("F_CPU: ");
+  SerialDebug.println(F_CPU);
+
+  SerialDebug.print("SystemCoreClock: ");
+  SerialDebug.println(SystemCoreClock);
+
+  SerialDebug.print("SYSCLK: ");
+  SerialDebug.println(HAL_RCC_GetSysClockFreq());
+
+  SerialDebug.print("HCLK: ");
+  SerialDebug.println(HAL_RCC_GetHCLKFreq());
+
+  SerialDebug.print("PCLK1: ");
+  SerialDebug.println(HAL_RCC_GetPCLK1Freq());
+
+  SerialDebug.print("PCLK2: ");
+  SerialDebug.println(HAL_RCC_GetPCLK2Freq());
+
+  SerialDebug.println("----------------------");
+}
 
 //---------------------------------------
 //    SYSTEM SETUP
@@ -660,17 +709,22 @@ void setup() {
 
   #if defined(ARDUINO_ARCH_STM32)
   initUARTs();
-  TwoWire BottomWire(YAW_SDA, YAW_SCL);
-  TwoWire TopWire(PITCH_SDA, PITCH_SCL);
+  printClockInfo();
   configureDigitalInputs(); 
   configureAnalogInputs();
   configureOutputsSafe();
   configurePWMOutputs();
   releaseDrivers();
   enablePowerRails();
+  enableMotorDrivers();
   #endif
 
-  SimpleFOCDebug::enable(&Serial);
+  delay(5000);
+
+  TwoWire BottomWire(YAW_SDA, YAW_SCL);
+  TwoWire TopWire(PITCH_SDA, PITCH_SCL);
+
+  SimpleFOCDebug::enable(&SerialDebug);
   SerialDebug.println(F("=== 2D Gimbal Initializing ==="));
 
 
@@ -814,15 +868,15 @@ void setup() {
 
 void loop(){
 
-  SerialDebug.println("Hello! This is working.");
-  delay(500);
+  // SerialDebug.println("Hello! This is working.");
+  // delay(500);
 
-  // --- Toggle Microcontroller Status Pin ---
-  if(millis() - stm_last_time >= 500){
-    stm_last_time += 500;
-    stm_counter += 500;
-    digitalWrite(STM_STAT, !digitalRead(STM_STAT));
-  }
+  // // --- Toggle Microcontroller Status Pin ---
+  // if(millis() - stm_last_time >= 500){
+  //   stm_last_time += 500;
+  //   stm_counter += 500;
+  //   digitalWrite(STM_STAT, !digitalRead(STM_STAT));
+  // }
 
   // --- Run FOC for Both Motors ---
   motorBottom.loopFOC();
@@ -832,50 +886,50 @@ void loop(){
   motorBottom.move(target_angle_bottom);
   motorTop.move(target_angle_top);
 
-  // --- Return Positional Telemetry ---
-  // Returns every 10ms (if enabled) in CSV format.
-  if(returnPosition){
-    if (millis() - pos_last_time >= 10) {
-      pos_last_time += 10;
-      pos_counter += 10;
+  // // --- Return Positional Telemetry ---
+  // // Returns every 10ms (if enabled) in CSV format.
+  // if(returnPosition){
+  //   if (millis() - pos_last_time >= 10) {
+  //     pos_last_time += 10;
+  //     pos_counter += 10;
 
-      SerialDebug.print(",");
-      SerialDebug.print(pos_counter);                   // time
-      SerialDebug.print(",");
-      SerialDebug.print(motorTop.shaftAngle(), 3);  // top motor
-      SerialDebug.print(",");
-      SerialDebug.println(motorBottom.shaftAngle(), 3); // bottom motor
-    }
-  }
+  //     SerialDebug.print(",");
+  //     SerialDebug.print(pos_counter);                   // time
+  //     SerialDebug.print(",");
+  //     SerialDebug.print(motorTop.shaftAngle(), 3);  // top motor
+  //     SerialDebug.print(",");
+  //     SerialDebug.println(motorBottom.shaftAngle(), 3); // bottom motor
+  //   }
+  // }
 
-  // --- Acquire and Process Analog Inputs ---
-  current_sys = systemCurrent(digitalRead(ADC_eFUSE_I));
-  voltage_sys = systemVoltage(digitalRead(ADC_eFUSE_V));
-  power_sys = current_sys * voltage_sys;
+  // // --- Acquire and Process Analog Inputs ---
+  // current_sys = systemCurrent(digitalRead(ADC_eFUSE_I));
+  // voltage_sys = systemVoltage(digitalRead(ADC_eFUSE_V));
+  // power_sys = current_sys * voltage_sys;
 
-  current_3V3 = currentSense(digitalRead(ADC_3_3V), 0.0015);
-  current_5V = currentSense(digitalRead(ADC_5V), 0.0015);
-  current_12V = currentSense(digitalRead(ADC_12V), 0.0015);
+  // current_3V3 = currentSense(digitalRead(ADC_3_3V), 0.0015);
+  // current_5V = currentSense(digitalRead(ADC_5V), 0.0015);
+  // current_12V = currentSense(digitalRead(ADC_12V), 0.0015);
 
-  current_BP1 = currentSense(digitalRead(ADC_YAW_RS1), 0.0100);
-  current_BP2 = currentSense(digitalRead(ADC_YAW_RS2), 0.0100);
-  current_BP3 = currentSense(digitalRead(ADC_YAW_RS3), 0.0100);
-  bottom_fault = digitalRead(YAW_nFAULT);
+  // current_BP1 = currentSense(digitalRead(ADC_YAW_RS1), 0.0100);
+  // current_BP2 = currentSense(digitalRead(ADC_YAW_RS2), 0.0100);
+  // current_BP3 = currentSense(digitalRead(ADC_YAW_RS3), 0.0100);
+  // bottom_fault = digitalRead(YAW_nFAULT);
 
-  current_TP1 = currentSense(digitalRead(ADC_PITCH_RS1), 0.0100);
-  current_TP2 = currentSense(digitalRead(ADC_PITCH_RS2), 0.0100);
-  current_TP3 = currentSense(digitalRead(ADC_PITCH_RS3), 0.0100);
-  top_fault = digitalRead(PITCH_nFAULT);
+  // current_TP1 = currentSense(digitalRead(ADC_PITCH_RS1), 0.0100);
+  // current_TP2 = currentSense(digitalRead(ADC_PITCH_RS2), 0.0100);
+  // current_TP3 = currentSense(digitalRead(ADC_PITCH_RS3), 0.0100);
+  // top_fault = digitalRead(PITCH_nFAULT);
 
-  // --- Check Power Limits ---
-  // Check current and voltage values at a rate of ~75hz.
-  if(checkPower){
-    if (millis() - pow_last_time >= 13) {
-      pow_last_time += 13;
-      pow_counter += 13;
-      powerCheck();
-    }
-  }
+  // // --- Check Power Limits ---
+  // // Check current and voltage values at a rate of ~75hz.
+  // if(checkPower){
+  //   if (millis() - pow_last_time >= 13) {
+  //     pow_last_time += 13;
+  //     pow_counter += 13;
+  //     powerCheck();
+  //   }
+  // }
 
   // --- Serial Command Processing ---
   command.run();
