@@ -17,10 +17,10 @@
 float target_angle_bottom = 0;        // pan/yaw target (radians)
 float target_angle_top = 0;           // tilt/pitch target (radians)
 
-float target_angle_bottom_min = 1.5;  // pan/yaw target angle minimum
-float target_angle_bottom_max = 3.5;  // pan/yaw target angle maximum
-float target_angle_top_min = -5.0;    // tilt/pitch target angle minimum
-float target_angle_top_max = -3.0;    // tilt/pitch target angle maximum
+float target_angle_bottom_min = 5.0;  // pan/yaw target angle minimum
+float target_angle_bottom_max = 7.0;  // pan/yaw target angle maximum
+float target_angle_top_min = -3.0;    // tilt/pitch target angle minimum
+float target_angle_top_max = -1.0;    // tilt/pitch target angle maximum
 
 float home_angle_bottom = 0;          // pan/yaw target (radians) defualt
 float home_angle_top = 0;             // tilt/pitch target (radians) default
@@ -217,8 +217,9 @@ void homeMotors(char* cmd){
 }
 
 void lock_motors(char* cmd){
+
   float enableMotor;
-  if(sscanf(cmd, "%f", &enableMotor) == 1){
+  if(sscanf(cmd, "%d", &enableMotor) == 1){
     if(enableMotor){
       motorBottom.enable();
       motorTop.enable();
@@ -661,12 +662,12 @@ void enablePowerRails() {
 void initUARTs() {
   SerialCM.setRx(PA3);
   SerialCM.setTx(PA2);
-  delay(3000);
+  delay(1000);
   SerialCM.begin(115200);
 
   SerialDebug.setTx(PC10);
   SerialDebug.setRx(PC11);
-  delay(3000);
+  delay(1000);
   SerialDebug.begin(115200);
 
 
@@ -701,10 +702,34 @@ static void printClockInfo() {
   SerialDebug.println("----------------------");
 }
 
+void i2cScan(TwoWire &wire, const char* busName) {
+  SerialDebug.print("\n");
+  SerialDebug.print("Scanning ");
+  SerialDebug.print(busName);
+  SerialDebug.println("...");
+
+  uint8_t found = 0;
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    wire.beginTransmission(addr);
+    if (wire.endTransmission() == 0) {
+      SerialDebug.print("  Found: 0x");
+      SerialDebug.println(addr, HEX);
+      found++;
+    }
+  }
+
+  if (found == 0) SerialDebug.println("  No devices found.");
+  else { SerialDebug.print("  Total: "); SerialDebug.println(found); }
+  SerialDebug.println();
+}
+
 //---------------------------------------
 //    SYSTEM SETUP
 //---------------------------------------
 
+TwoWire TopWire(PITCH_SDA, PITCH_SCL);
+TwoWire BottomWire(YAW_SDA, YAW_SCL);
+  
 void setup() {
 
   #if defined(ARDUINO_ARCH_STM32)
@@ -719,10 +744,8 @@ void setup() {
   enableMotorDrivers();
   #endif
 
-  delay(5000);
 
-  TwoWire BottomWire(YAW_SDA, YAW_SCL);
-  TwoWire TopWire(PITCH_SDA, PITCH_SCL);
+  
 
   SimpleFOCDebug::enable(&SerialDebug);
   SerialDebug.println(F("=== 2D Gimbal Initializing ==="));
@@ -732,10 +755,11 @@ void setup() {
   #if defined(ARDUINO_ARCH_STM32)
       SerialDebug.println(F("Init bottom sensor (BottomWire)..."));
       BottomWire.begin();
+      i2cScan(BottomWire, "BottomWire (YAW)");
       sensorBottom.init(&BottomWire);
-
       SerialDebug.println(F("Init top sensor (TopWire)..."));
       TopWire.begin();
+      i2cScan(TopWire, "TopWire (PITCH)");
       sensorTop.init(&TopWire);
   #else
       SerialDebug.println(F("Init bottom sensor (Wire)..."));
@@ -775,6 +799,37 @@ void setup() {
   }
 
 
+  // --- Top Motor (Pitch) Setup ---
+  SerialDebug.println(F("--- Top Motor (Tilt) ---"));
+  motorTop.linkSensor(&sensorTop);
+
+  driverTop.voltage_power_supply = 12;
+  driverTop.init();
+  __HAL_RCC_TIM8_CLK_ENABLE();
+  TIM8->BDTR |= TIM_BDTR_MOE;
+  motorTop.linkDriver(&driverTop);
+
+  motorTop.foc_modulation = FOCModulationType::SpaceVectorPWM;
+  motorTop.controller = MotionControlType::angle;
+
+  // Velocity PID - may need different tuning for tilt axis
+  motorTop.PID_velocity.P = settings.top_p;
+  motorTop.PID_velocity.I = settings.top_i;
+  motorTop.PID_velocity.D = settings.top_d;
+  motorTop.PID_velocity.output_ramp = 100;
+
+  motorTop.voltage_limit = 2.3;
+  motorTop.LPF_velocity.Tf = settings.top_lpf;
+
+  // Angle P controller
+  motorTop.P_angle.P = 10;
+  motorTop.velocity_limit = settings.top_vlimit;
+
+  motorTop.useMonitoring(Serial);
+  motorTop.init();
+  motorTop.initFOC();
+
+
   // --- Bottom Motor (Yaw) Setup ---
   SerialDebug.println(F("--- Bottom Motor (Pan) ---"));
   motorBottom.linkSensor(&sensorBottom);
@@ -803,44 +858,11 @@ void setup() {
   motorBottom.init();
   motorBottom.initFOC();
 
-
-  // --- Top Motor (Pitch) Setup ---
-  SerialDebug.println(F("--- Top Motor (Tilt) ---"));
-  motorTop.linkSensor(&sensorTop);
-
-  driverTop.voltage_power_supply = 12;
-  driverTop.init();
-  motorTop.linkDriver(&driverTop);
-
-  motorTop.foc_modulation = FOCModulationType::SpaceVectorPWM;
-  motorTop.controller = MotionControlType::angle;
-
-  // Velocity PID - may need different tuning for tilt axis
-  motorTop.PID_velocity.P = settings.top_p;
-  motorTop.PID_velocity.I = settings.top_i;
-  motorTop.PID_velocity.D = settings.top_d;
-  motorTop.PID_velocity.output_ramp = 100;
-
-  motorTop.voltage_limit = 2.3;
-  motorTop.LPF_velocity.Tf = settings.top_lpf;
-
-  // Angle P controller
-  motorTop.P_angle.P = 10;
-  motorTop.velocity_limit = settings.top_vlimit;
-
-  motorTop.useMonitoring(Serial);
-  motorTop.init();
-  motorTop.initFOC();
-
-
   // --- Motor Initial State Setup ---
   target_angle_bottom = motorBottom.shaftAngle();
   target_angle_top = motorTop.shaftAngle();
   home_angle_bottom = settings.bottom_home;
   home_angle_top = settings.top_home;
-  motorBottom.disable();
-  motorTop.disable();
-
 
   // --- Commander Setup ---
   command.add('B', doTargetBottom, "bottom/pan angle (rad), relative?");
@@ -886,21 +908,21 @@ void loop(){
   motorBottom.move(target_angle_bottom);
   motorTop.move(target_angle_top);
 
-  // // --- Return Positional Telemetry ---
-  // // Returns every 10ms (if enabled) in CSV format.
-  // if(returnPosition){
-  //   if (millis() - pos_last_time >= 10) {
-  //     pos_last_time += 10;
-  //     pos_counter += 10;
+  // --- Return Positional Telemetry ---
+  // Returns every 10ms (if enabled) in CSV format.
+  if(returnPosition){
+    if (millis() - pos_last_time >= 10) {
+      pos_last_time += 10;
+      pos_counter += 10;
 
-  //     SerialDebug.print(",");
-  //     SerialDebug.print(pos_counter);                   // time
-  //     SerialDebug.print(",");
-  //     SerialDebug.print(motorTop.shaftAngle(), 3);  // top motor
-  //     SerialDebug.print(",");
-  //     SerialDebug.println(motorBottom.shaftAngle(), 3); // bottom motor
-  //   }
-  // }
+      SerialDebug.print(",");
+      SerialDebug.print(pos_counter);                   // time
+      SerialDebug.print(",");
+      SerialDebug.print(motorTop.shaftAngle(), 3);  // top motor
+      SerialDebug.print(",");
+      SerialDebug.println(motorBottom.shaftAngle(), 3); // bottom motor
+    }
+  }
 
   // // --- Acquire and Process Analog Inputs ---
   // current_sys = systemCurrent(digitalRead(ADC_eFUSE_I));
