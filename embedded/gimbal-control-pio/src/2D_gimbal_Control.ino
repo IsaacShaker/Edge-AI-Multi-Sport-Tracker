@@ -130,7 +130,7 @@ BLDCDriver3PWM driverBottom = BLDCDriver3PWM(YAW_IN1, YAW_IN2, YAW_IN3, YAW_EN);
 
 // --- Top Motor (Tilt/Pitch) ---
 BLDCMotor motorTop = BLDCMotor(POLE_PAIRS, PHASE_RESISTANCE, KV_RATING, Q_INDUCTANCE);
-BLDCDriver3PWM driverTop = BLDCDriver3PWM(PITCH_IN1, PITCH_IN2 , PITCH_IN3, PITCH_EN);  // PWM pins + enable
+BLDCDriver3PWM driverTop = BLDCDriver3PWM(PITCH_IN3, PITCH_IN2 , PITCH_IN1, PITCH_EN);  // PWM pins + enable
 
 
 //---------------------------------------
@@ -621,9 +621,7 @@ void releaseDrivers() {
 // --- Enable Driver Outputs ---
 void enableMotorDrivers() {
   digitalWrite(YAW_EN, HIGH);
-  delay(1500);
   digitalWrite(PITCH_EN, HIGH);
-  delay(1500);
   SerialDebug.println("----- Motor drivers enabled! -----");
 
 }
@@ -662,13 +660,12 @@ void enablePowerRails() {
 void initUARTs() {
   SerialCM.setRx(PA3);
   SerialCM.setTx(PA2);
-  delay(1000);
   SerialCM.begin(115200);
-
+  delay(250);
   SerialDebug.setTx(PC10);
   SerialDebug.setRx(PC11);
-  delay(1000);
   SerialDebug.begin(115200);
+  delay(250);
 
 
   SerialDebug.println("--- Debug UART ready! ---");
@@ -729,7 +726,7 @@ void i2cScan(TwoWire &wire, const char* busName) {
 
 TwoWire TopWire(PITCH_SDA, PITCH_SCL);
 TwoWire BottomWire(YAW_SDA, YAW_SCL);
-  
+
 void setup() {
 
   #if defined(ARDUINO_ARCH_STM32)
@@ -818,7 +815,7 @@ void setup() {
   motorTop.PID_velocity.D = settings.top_d;
   motorTop.PID_velocity.output_ramp = 100;
 
-  motorTop.voltage_limit = 2.3;
+  motorTop.voltage_limit = 4.0;
   motorTop.LPF_velocity.Tf = settings.top_lpf;
 
   // Angle P controller
@@ -831,9 +828,9 @@ void setup() {
 
 
   // --- Bottom Motor (Yaw) Setup ---
+  delay(500);
   SerialDebug.println(F("--- Bottom Motor (Pan) ---"));
   motorBottom.linkSensor(&sensorBottom);
-
   driverBottom.voltage_power_supply = 12;
   driverBottom.init();
   motorBottom.linkDriver(&driverBottom);
@@ -847,7 +844,7 @@ void setup() {
   motorBottom.PID_velocity.D = settings.bottom_d;
   motorBottom.PID_velocity.output_ramp = 100;
 
-  motorBottom.voltage_limit = 2.3;
+  motorBottom.voltage_limit = 4.0;
   motorBottom.LPF_velocity.Tf = settings.bottom_lpf;
 
   // Angle P controller
@@ -879,8 +876,10 @@ void setup() {
   command.add('S', saveSettings, "Save Settings: S <PID(0|1)> <Velocity(0|1)> <Home(0|1)>");
 
   SerialDebug.println(F("=== 2D Gimbal Ready ==="));
+  motorTop.disable();
+  motorBottom.disable();
   SerialDebug.println(F("ATTENTION: Motors initialized as disabled!"));
-  _delay(1000);
+  delay(1000);
 }
   
 
@@ -911,9 +910,9 @@ void loop(){
   // --- Return Positional Telemetry ---
   // Returns every 10ms (if enabled) in CSV format.
   if(returnPosition){
-    if (millis() - pos_last_time >= 10) {
-      pos_last_time += 10;
-      pos_counter += 10;
+    if (millis() - pos_last_time >= POS_INTERVAL) {
+      pos_last_time += POS_INTERVAL;
+      pos_counter += POS_INTERVAL;
 
       SerialDebug.print(",");
       SerialDebug.print(pos_counter);                   // time

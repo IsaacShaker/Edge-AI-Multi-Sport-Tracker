@@ -12,6 +12,11 @@
 #define KV_RATING 220
 #define Q_INDUCTANCE 0.00086f
 
+//---------------------------------------
+// TELEMETRY
+//---------------------------------------
+
+#define POS_INTERVAL 10
 
 //---------------------------------------
 // POWER SAFETY THRESHOLDS
