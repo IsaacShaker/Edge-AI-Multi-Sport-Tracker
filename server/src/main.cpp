@@ -23,7 +23,8 @@ void printUsage() {
     std::cout << "====================================" << std::endl;
     std::cout << "\nUsage: tracker_server [options]" << std::endl;
     std::cout << "\nOptions:" << std::endl;
-    std::cout << "  --vision <type>       Vision detector type (color_based, yolo)" << std::endl;
+    std::cout << "  --vision <type>       Vision detector type (yolo, hailo, color_based) [default: yolo]" << std::endl;
+    std::cout << "  --model <path>        Model file path (.onnx for yolo, .hef for hailo)" << std::endl;
     std::cout << "  --estimator <type>    State estimator type (kalman_cv, kalman_ca, imm)" << std::endl;
     std::cout << "  --motor <type>        Motor controller type (simplefoc, mock)" << std::endl;
     std::cout << "  --serial-port <dev>   Serial port for SimpleFOC controller (default: /dev/ttyACM0)" << std::endl;
@@ -57,7 +58,7 @@ int main(int argc, char** argv) {
     ServerConfig config;
     
     // Default configuration
-    config.vision.model_type = "color_based";  // Using color-based until YOLO is implemented
+    config.vision.model_type = "yolo";
     config.estimator.estimator_type = "kalman_ca";  // Constant acceleration model (handles changing velocity)
     config.motor.controller_type = "mock";
     
@@ -74,6 +75,10 @@ int main(int argc, char** argv) {
         else if (arg == "--vision" && i + 1 < argc) {
             config.vision.model_type = argv[++i];
         }
+        else if (arg == "--model" && i + 1 < argc) {
+            config.vision.model_path = argv[++i];
+        }
+
         else if (arg == "--estimator" && i + 1 < argc) {
             config.estimator.estimator_type = argv[++i];
         }
@@ -108,6 +113,7 @@ int main(int argc, char** argv) {
     // Print configuration
     std::cout << "\n=== Configuration ===" << std::endl;
     std::cout << "Vision:    " << config.vision.model_type << std::endl;
+    std::cout << "Model:     " << config.vision.model_path << std::endl;
     std::cout << "Estimator: " << config.estimator.estimator_type << std::endl;
     std::cout << "Motor:     " << config.motor.controller_type << std::endl;
     std::cout << "Camera:    " << config.camera_source << std::endl;

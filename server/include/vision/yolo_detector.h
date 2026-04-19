@@ -3,7 +3,8 @@
 #include "vision_detector_base.h"
 #include "../factories/vision_factory.h"
 #include <opencv2/opencv.hpp>
-#include <opencv2/dnn.hpp>
+#include <onnxruntime/onnxruntime_cxx_api.h>
+#include <memory>
 
 namespace tracker {
 
@@ -32,17 +33,28 @@ public:
 
 private:
     VisionConfig config_;
-    
-    cv::dnn::Net net_;
+
+    Ort::Env                            env_{ORT_LOGGING_LEVEL_WARNING, "yolo"};
+    Ort::SessionOptions                 session_options_;
+    std::unique_ptr<Ort::Session>       session_;
+    Ort::AllocatorWithDefaultOptions    allocator_;
+
+    std::vector<std::string>            input_names_owned_;
+    std::vector<std::string>            output_names_owned_;
+    std::vector<const char*>            input_names_;
+    std::vector<const char*>            output_names_;
+
+    int64_t model_input_w_{640};
+    int64_t model_input_h_{640};
+
     std::vector<std::string> class_names_;
-    
-    /**
-     * @brief Post-process YOLO network output
-     */
+
     std::vector<Detection> postprocess(
-        const std::vector<cv::Mat>& outputs,
-        int frame_width,
-        int frame_height
+        const float*  output_data,
+        int64_t       num_features,
+        int64_t       num_anchors,
+        int           frame_width,
+        int           frame_height
     );
 };
 

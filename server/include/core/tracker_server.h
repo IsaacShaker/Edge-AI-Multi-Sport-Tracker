@@ -11,6 +11,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <condition_variable>
 #include <chrono>
 #include <fstream>
 #include <opencv2/opencv.hpp>
@@ -112,6 +113,18 @@ private:
     // Control
     std::atomic<bool> running_;
     std::thread tracker_thread_;
+
+    // Async detection thread — decouples YOLO inference (~4fps) from capture (30fps)
+    std::thread detect_thread_;
+    std::mutex frame_mutex_;
+    std::condition_variable frame_cv_;
+    cv::Mat pending_detect_frame_;
+    cv::Rect pending_detect_roi_;       // ROI snapshot passed to detect thread
+    bool pending_detect_use_roi_{false};
+    bool new_frame_ready_{false};
+    std::mutex detections_mutex_;
+    std::vector<Detection> async_detections_;
+    bool fresh_detections_{false};
     
     // Statistics
     mutable std::mutex stats_mutex_;
@@ -141,6 +154,11 @@ private:
      * @brief Main tracking loop (runs in separate thread)
      */
     void trackerLoop();
+
+    /**
+     * @brief YOLO detection loop — runs in its own thread, feeds async_detections_
+     */
+    void detectLoop();
     
     /**
      * @brief Update search ROI based on predicted position

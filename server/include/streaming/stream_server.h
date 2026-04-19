@@ -45,6 +45,10 @@ public:
     void pushFrame(const cv::Mat& frame, int jpeg_quality = 75);
     void pushTelemetry(const TelemetryData& data);
 
+    // Called once after start() with a JSON string of the runtime config.
+    // Served verbatim at GET /config so the dashboard can display settings.
+    void setConfig(const std::string& json);
+
 private:
     std::atomic<bool> running_{false};
     int  port_{8080};
@@ -63,11 +67,15 @@ private:
     TelemetryData           latest_telemetry_;
     uint64_t                telemetry_seq_{0};
 
+    // Config JSON — set once at startup, served at /config
+    std::string config_json_;
+
     void acceptLoop();
     void handleClient(int fd);
     void serveStatic(int fd);
     void serveMjpeg(int fd);
     void serveSSE(int fd);
+    void serveConfig(int fd);
     void serve404(int fd);
 
     static bool        writeAll(int fd, const void* buf, size_t len);

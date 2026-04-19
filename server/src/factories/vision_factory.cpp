@@ -1,6 +1,9 @@
 #include "../include/factories/vision_factory.h"
 #include "../include/vision/color_based_detector.h"
 #include "../include/vision/yolo_detector.h"
+#ifdef WITH_HAILO
+#include "../include/vision/hailo_detector.h"
+#endif
 #include <iostream>
 
 namespace tracker {
@@ -57,7 +60,7 @@ void VisionFactory::registerBuiltinCreators() {
         return nullptr;
     });
     
-    // Register YOLO detector
+    // Register YOLO detector (OpenCV DNN / CPU)
     registerCreator("yolo", [](const VisionConfig& config) -> VisionDetectorPtr {
         auto detector = std::make_shared<YOLODetector>();
         if (detector->initialize(config)) {
@@ -65,6 +68,17 @@ void VisionFactory::registerBuiltinCreators() {
         }
         return nullptr;
     });
+
+    // Register Hailo NPU detector (requires WITH_HAILO=ON at build time)
+#ifdef WITH_HAILO
+    registerCreator("hailo", [](const VisionConfig& config) -> VisionDetectorPtr {
+        auto detector = std::make_shared<HailoDetector>();
+        if (detector->initialize(config)) {
+            return detector;
+        }
+        return nullptr;
+    });
+#endif
 }
 
 } // namespace tracker

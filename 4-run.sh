@@ -11,6 +11,7 @@ EXECUTABLE="$BUILD_DIR/bin/tracker_server"
 ESTIMATOR="imm"
 MOTOR="mock"
 CAMERA="0"
+VISION="yolo"
 VIZ_FLAG=""  # Empty by default, visualization is ON by default in C++
 
 # Parse command line arguments or use defaults
@@ -28,6 +29,18 @@ while [[ $# -gt 0 ]]; do
             CAMERA="$2"
             shift 2
             ;;
+        --vision)
+            VISION="$2"
+            shift 2
+            ;;
+        --model)
+            echo "Note: model path is hardcoded; ignoring --model"
+            shift 2
+            ;;
+        --target)
+            echo "Note: target label is hardcoded to 'sports ball'; ignoring --target"
+            shift 2
+            ;;
         --no-display)
             VIZ_FLAG="--no-viz"
             shift
@@ -36,6 +49,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
+            echo "  --vision TYPE       Vision detector: yolo or color_based (default: yolo)"
             echo "  --estimator TYPE    Estimator type: kalman_cv, kalman_ca, or imm (default: imm)"
             echo "  --motor TYPE        Motor controller: mock or simplefoc (default: mock)"
             echo "  --camera ID         Camera device ID (default: 0)"
@@ -43,10 +57,11 @@ while [[ $# -gt 0 ]]; do
             echo "  --help              Show this help message"
             echo ""
             echo "Examples:"
-            echo "  $0                                    # Run with defaults (IMM estimator, mock motor, camera 0)"
-            echo "  $0 --estimator kalman_cv              # Use constant velocity Kalman filter"
-            echo "  $0 --motor simplefoc                  # Use SimpleFOC motor controller"
-            echo "  $0 --camera 1 --no-display            # Use camera 1 without display"
+            echo "  $0 --model models/yolov8n.onnx                    # Run YOLOv8 with custom model"
+            echo "  $0 --vision color_based                           # Use color-based detector"
+            echo "  $0 --estimator kalman_cv                          # Use constant velocity Kalman filter"
+            echo "  $0 --motor simplefoc                              # Use SimpleFOC motor controller"
+            echo "  $0 --camera 1 --no-display                        # Use camera 1 without display"
             exit 0
             ;;
         *)
@@ -83,9 +98,10 @@ fi
 
 # Run the tracker
 echo "Starting tracker with:"
+echo "  Vision:    $VISION"
 echo "  Estimator: $ESTIMATOR"
-echo "  Motor: $MOTOR"
-echo "  Camera: $CAMERA"
+echo "  Motor:     $MOTOR"
+echo "  Camera:    $CAMERA"
 echo "  Display: $([ -z "$VIZ_FLAG" ] && echo "enabled" || echo "disabled")"
 echo ""
 
@@ -103,4 +119,6 @@ export DISPLAY="${DISPLAY:-:0}"
 # Avoid snap library conflicts that can cause version mismatches
 unset GIO_MODULE_DIR
 
-./bin/tracker_server --estimator "$ESTIMATOR" --motor "$MOTOR" --camera "$CAMERA" $VIZ_FLAG
+# Build optional model flag
+YOLO_MODEL="$(dirname "$0")/models/yolo11n.onnx"
+./bin/tracker_server --vision "$VISION" --model "$YOLO_MODEL" --estimator "$ESTIMATOR" --motor "$MOTOR" --camera "$CAMERA" $VIZ_FLAG
