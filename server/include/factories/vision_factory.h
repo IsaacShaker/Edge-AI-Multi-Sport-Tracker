@@ -24,10 +24,11 @@ struct VisionConfig : public Config {
     int val_min, val_max;
     
     VisionConfig() 
-        : confidence_threshold(0.5f),
+        : confidence_threshold(0.20f),
           input_width(640),
           input_height(480),
           target_label("sports ball"),
+          model_path("../../models/yolov8n.onnx"),
           hue_min(25), hue_max(45),      // Yellow-green for tennis balls
           sat_min(80), sat_max(255),
           val_min(80), val_max(255) {}

@@ -14,15 +14,50 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # Options
 option(BUILD_TESTS "Build unit tests" ON)
 option(BUILD_EXAMPLES "Build example applications" ON)
+option(WITH_HAILO "Enable Hailo NPU support (requires HailoRT SDK)" OFF)
 
 # Find packages
 find_package(Threads REQUIRED)
 find_package(OpenCV REQUIRED)
 
+# ── ONNX Runtime (required for YOLODetector) ─────────────────────────────────
+find_path(ONNXRUNTIME_INCLUDE_DIR onnxruntime/onnxruntime_cxx_api.h
+    PATHS /usr/include /usr/local/include)
+find_library(ONNXRUNTIME_LIB onnxruntime
+    PATHS /usr/lib/aarch64-linux-gnu /usr/local/lib /usr/lib)
+
+if(NOT ONNXRUNTIME_INCLUDE_DIR OR NOT ONNXRUNTIME_LIB)
+    message(FATAL_ERROR "ONNX Runtime not found. On the Pi: sudo apt install libonnxruntime-dev")
+endif()
+message(STATUS "ONNX Runtime: ${ONNXRUNTIME_LIB}")
+
+# ── Optional: Hailo NPU (HailoRT) ─────────────────────────────────────────────
+if(WITH_HAILO)
+    find_package(HailoRT QUIET)
+    if(HailoRT_FOUND)
+        message(STATUS "HailoRT found: ${HailoRT_VERSION}")
+        add_compile_definitions(WITH_HAILO)
+    else()
+        # Fall back to searching header/lib manually under /usr/local
+        find_path(HAILO_INCLUDE_DIR hailo/hailort.hpp PATHS /usr/local/include /usr/include)
+        find_library(HAILO_LIB hailort PATHS /usr/local/lib /usr/lib)
+        if(HAILO_INCLUDE_DIR AND HAILO_LIB)
+            message(STATUS "HailoRT found manually: ${HAILO_LIB}")
+            add_compile_definitions(WITH_HAILO)
+            set(HailoRT_INCLUDE_DIRS ${HAILO_INCLUDE_DIR})
+            set(HailoRT_LIBRARIES    ${HAILO_LIB})
+        else()
+            message(WARNING "WITH_HAILO=ON but HailoRT not found — building without Hailo support")
+            set(WITH_HAILO OFF)
+        endif()
+    endif()
+endif()
+
 # Include directories
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
     ${OpenCV_INCLUDE_DIRS}
+    ${ONNXRUNTIME_INCLUDE_DIR}
 )
 
 # Source files
@@ -31,6 +66,10 @@ set(VISION_SOURCES
     src/vision/color_based_detector.cpp
     src/vision/yolo_detector.cpp
 )
+
+if(WITH_HAILO)
+    list(APPEND VISION_SOURCES src/vision/hailo_detector.cpp)
+endif()
 
 set(ESTIMATION_SOURCES
     src/estimation/state_estimator_base.cpp
@@ -81,7 +120,12 @@ set(CORE_SOURCES
 
 # Create static libraries for each subsystem
 add_library(vision STATIC ${VISION_SOURCES})
-target_link_libraries(vision ${OpenCV_LIBS})
+target_include_directories(vision PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+target_link_libraries(vision ${OpenCV_LIBS} ${ONNXRUNTIME_LIB})
+if(WITH_HAILO)
+    target_include_directories(vision PRIVATE ${HailoRT_INCLUDE_DIRS})
+    target_link_libraries(vision ${HailoRT_LIBRARIES})
+endif()
 
 add_library(estimation STATIC ${ESTIMATION_SOURCES})
 target_link_libraries(estimation ${OpenCV_LIBS})

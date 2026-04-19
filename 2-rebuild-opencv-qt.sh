@@ -29,7 +29,7 @@ sudo apt install -y \
     libx264-dev
 
 # Create build directory
-OPENCV_VERSION="4.5.4"
+OPENCV_VERSION="4.10.0"
 BUILD_DIR="/tmp/opencv-build"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
@@ -39,6 +39,8 @@ if [ ! -d "opencv" ]; then
     echo "Downloading OpenCV $OPENCV_VERSION..."
     git clone --depth 1 --branch "$OPENCV_VERSION" https://github.com/opencv/opencv.git
     git clone --depth 1 --branch "$OPENCV_VERSION" https://github.com/opencv/opencv_contrib.git
+else
+    echo "OpenCV source already present, skipping clone."
 fi
 
 cd opencv
@@ -55,6 +57,8 @@ cmake \
     -D WITH_OPENGL=ON \
     -D OPENCV_EXTRA_MODULES_PATH=../../opencv_contrib/modules \
     -D BUILD_EXAMPLES=OFF \
+    -D BUILD_TESTS=OFF \
+    -D BUILD_PERF_TESTS=OFF \
     -D INSTALL_PYTHON_EXAMPLES=OFF \
     -D INSTALL_C_EXAMPLES=OFF \
     -D BUILD_opencv_python2=OFF \

@@ -101,8 +101,9 @@ bool TrackerServer::start() {
     
     std::cout << "Starting tracker server..." << std::endl;
     running_ = true;
+    detect_thread_  = std::thread(&TrackerServer::detectLoop,  this);
     tracker_thread_ = std::thread(&TrackerServer::trackerLoop, this);
-    
+
     return true;
 }
 
@@ -113,7 +114,18 @@ void TrackerServer::stop() {
     
     std::cout << "Stopping tracker server..." << std::endl;
     running_ = false;
-    
+
+    // Wake detect thread so it can observe running_==false and exit
+    {
+        std::lock_guard<std::mutex> lk(frame_mutex_);
+        new_frame_ready_ = true;
+    }
+    frame_cv_.notify_one();
+
+    if (detect_thread_.joinable()) {
+        detect_thread_.join();
+    }
+
     if (tracker_thread_.joinable()) {
         tracker_thread_.join();
     }
@@ -132,6 +144,27 @@ void TrackerServer::stop() {
 TrackerServer::Stats TrackerServer::getStats() const {
     std::lock_guard<std::mutex> lock(stats_mutex_);
     return stats_;
+}
+
+void TrackerServer::detectLoop() {
+    while (running_) {
+        cv::Mat frame;
+        {
+            std::unique_lock<std::mutex> lk(frame_mutex_);
+            frame_cv_.wait(lk, [this]{ return new_frame_ready_ || !running_; });
+            if (!running_) break;
+            frame = pending_detect_frame_;   // lightweight ref-counted copy
+            new_frame_ready_ = false;
+        }
+
+        auto dets = vision_->detect(frame.data, frame.cols, frame.rows);
+
+        {
+            std::lock_guard<std::mutex> lk(detections_mutex_);
+            async_detections_ = std::move(dets);
+            fresh_detections_ = true;
+        }
+    }
 }
 
 void TrackerServer::trackerLoop() {
@@ -182,6 +215,15 @@ void TrackerServer::trackerLoop() {
             std::cerr << "Failed to capture frame" << std::endl;
             continue;
         }
+
+        // Feed latest frame to the async detection thread (non-blocking — drops
+        // frames that arrive while YOLO is still busy, always keeps newest).
+        {
+            std::lock_guard<std::mutex> lk(frame_mutex_);
+            pending_detect_frame_ = frame;
+            new_frame_ready_ = true;
+        }
+        frame_cv_.notify_one();
         
         // Process frame — run full visualization pipeline when either the local
         // display or the web stream is active (both need the annotated frame).
@@ -329,54 +371,24 @@ TrackerServer::TrackingResult TrackerServer::detectAndTrack(cv::Mat& frame) {
     result.has_detection = false;
     result.has_state = false;
     result.has_prediction = false;
-    result.roi_used = use_roi_ ? search_roi_ : cv::Rect(0, 0, frame.cols, frame.rows);
-    
-    // Prepare search region
-    cv::Mat search_region;
-    int roi_offset_x = 0;
-    int roi_offset_y = 0;
-    
-    if (use_roi_ && search_roi_.width > 0 && search_roi_.height > 0) {
-        // Clone the ROI to ensure contiguous memory
-        search_region = frame(search_roi_).clone();
-        roi_offset_x = search_roi_.x;
-        roi_offset_y = search_roi_.y;
-    } else {
-        search_region = frame;
-    }
-    
-    // Detect objects in search region
-    auto detections = vision_->detect(search_region.data, search_region.cols, search_region.rows);
-    
-    // Adjust detection coordinates back to full frame
-    for (auto& detection : detections) {
-        detection.center.x += roi_offset_x;
-        detection.center.y += roi_offset_y;
-        if (detection.has_bbox) {
-            detection.bbox.x += roi_offset_x;
-            detection.bbox.y += roi_offset_y;
+    result.roi_used = cv::Rect(0, 0, frame.cols, frame.rows);
+
+    // Pull the latest detections produced by the async detection thread.
+    // When fresh_detections_ is false the detect thread is still busy — we
+    // fall through to the Kalman-predict-only path below.
+    std::vector<Detection> detections;
+    {
+        std::lock_guard<std::mutex> lk(detections_mutex_);
+        if (fresh_detections_) {
+            detections = async_detections_;
+            fresh_detections_ = false;
         }
     }
-    
+
     if (detections.empty()) {
         lost_frames_count_++;
-        
-        // Early fallback: if using ROI and lost 2-4 frames, try full frame search
-        // This catches fast-moving objects that escape the ROI
-        if (use_roi_ && lost_frames_count_ >= FALLBACK_TRIGGER_FRAMES && lost_frames_count_ <= 4) {
-            auto full_detections = vision_->detect(frame.data, frame.cols, frame.rows);
-            
-            if (!full_detections.empty()) {
-                // Found it in full frame! Recover and continue tracking
-                detections = full_detections;
-                lost_frames_count_ = 0;
-                result.roi_used = cv::Rect(0, 0, frame.cols, frame.rows);  // Mark as full frame
-                std::cout << "[ROI Recovery] Object found in full-frame fallback search" << std::endl;
-                goto process_detection;  // Jump to detection processing
-            }
-        }
-        
-        // After sustained loss, reset to full-frame search permanently
+
+        // After sustained loss, reset ROI state
         if (lost_frames_count_ >= MAX_LOST_FRAMES) {
             resetSearchROI();
         }
@@ -399,9 +411,7 @@ TrackerServer::TrackingResult TrackerServer::detectAndTrack(cv::Mat& frame) {
         }
         return result;
     }
-    
-process_detection:
-    
+
     // Reset lost frame counter on successful detection
     lost_frames_count_ = 0;
     
