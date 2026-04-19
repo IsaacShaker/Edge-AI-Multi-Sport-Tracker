@@ -70,13 +70,24 @@ private:
     // Config JSON — set once at startup, served at /config
     std::string config_json_;
 
+    // Recording state
+    std::atomic<bool>  recording_{false};
+    std::mutex         record_mutex_;
+    cv::VideoWriter    video_writer_;
+    std::string        record_path_;
+
     void acceptLoop();
     void handleClient(int fd);
     void serveStatic(int fd);
     void serveMjpeg(int fd);
     void serveSSE(int fd);
     void serveConfig(int fd);
+    void serveRecordStart(int fd);
+    void serveRecordStop(int fd);
+    void serveRecordDownload(int fd);
     void serve404(int fd);
+    void startRecording();
+    void stopRecording();
 
     static bool        writeAll(int fd, const void* buf, size_t len);
     static std::string telemetryToJson(const TelemetryData& d);

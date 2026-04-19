@@ -230,6 +230,46 @@
         transition: width 0.3s;
         width: 0%;
       }
+
+      /* ── Recording card ── */
+      .rec-btn {
+        width: 100%;
+        padding: 9px 0;
+        background: #1e2535;
+        color: #e0e6f0;
+        border: 1px solid #2a3145;
+        border-radius: 7px;
+        font-size: 0.83rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+        letter-spacing: 0.2px;
+      }
+      .rec-btn:hover {
+        background: #2a3145;
+      }
+      .rec-btn.active {
+        background: #2b0d0d;
+        color: #ff5b5b;
+        border-color: #5b1a1a;
+      }
+      .dl-btn {
+        display: block;
+        text-align: center;
+        padding: 9px 0;
+        background: #0d2b1a;
+        color: #3ddc84;
+        border: 1px solid #1a5b32;
+        border-radius: 7px;
+        font-size: 0.83rem;
+        font-weight: 600;
+        text-decoration: none;
+        transition: background 0.3s;
+        margin-top: 8px;
+      }
+      .dl-btn:hover {
+        background: #143d28;
+      }
     </style>
   </head>
   <body>
@@ -257,6 +297,10 @@
           onerror="
             this.style.display = 'none';
             document.getElementById('placeholder').style.display = 'block';
+            var img = this;
+            setTimeout(function () {
+              img.src = '/stream?' + Date.now();
+            }, 3000);
           "
         />
       </div>
@@ -316,6 +360,24 @@
             <span class="ml">Frames processed</span>
             <span class="mv" id="fc">0</span>
           </div>
+        </div>
+
+        <div class="card">
+          <h2>Recording</h2>
+          <button id="rec-btn" class="rec-btn">&#9679; Start Recording</button>
+          <div
+            class="mrow"
+            id="rec-status-row"
+            style="display: none; margin-top: 8px"
+          >
+            <span class="ml">Status</span>
+            <span class="mv" id="rec-state" style="color: #ff5b5b"
+              >&#9679; Recording&hellip;</span
+            >
+          </div>
+          <button id="rec-dl" class="dl-btn" style="display: none">
+            &#8595; Download Recording
+          </button>
         </div>
 
         <div class="card">
@@ -422,18 +484,63 @@
 
         connect();
 
+        // ── Recording ────────────────────────────────────────────────────────
+        // Download via hidden iframe — avoids any page navigation that would
+        // interrupt the MJPEG stream connection.
+        $("rec-dl").addEventListener("click", function () {
+          var iframe = document.createElement("iframe");
+          iframe.style.display = "none";
+          iframe.src = "/record/download";
+          document.body.appendChild(iframe);
+          setTimeout(function () {
+            if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+          }, 120000);
+        });
+
+        var isRecording = false;
+        $("rec-btn").addEventListener("click", function () {
+          var url = isRecording ? "/record/stop" : "/record/start";
+          fetch(url, { method: "POST" })
+            .then(function (r) {
+              return r.json();
+            })
+            .then(function (d) {
+              isRecording = d.recording;
+              var btn = $("rec-btn");
+              var statusRow = $("rec-status-row");
+              var dlLink = $("rec-dl");
+              if (isRecording) {
+                btn.textContent = "\u25a0 Stop Recording";
+                btn.className = "rec-btn active";
+                statusRow.style.display = "flex";
+                dlLink.style.display = "none";
+              } else {
+                btn.textContent = "\u25cf Start Recording";
+                btn.className = "rec-btn";
+                statusRow.style.display = "none";
+                dlLink.style.display = "block";
+              }
+            })
+            .catch(function () {});
+        });
+
         // Fetch static config once on load and populate the Configuration card.
         fetch("/config")
-          .then(function (r) { return r.json(); })
+          .then(function (r) {
+            return r.json();
+          })
           .then(function (c) {
-            $("cfg-vision").textContent    = c.vision        || "\u2014";
-            $("cfg-target").textContent    = c.target_label  || "\u2014";
-            $("cfg-conf").textContent      = c.confidence_threshold != null
-              ? (c.confidence_threshold * 100).toFixed(0) + "%" : "\u2014";
-            $("cfg-estimator").textContent = c.estimator     || "\u2014";
-            $("cfg-motor").textContent     = c.motor         || "\u2014";
-            $("cfg-serial").textContent    = c.serial_port   || "\u2014";
-            $("cfg-fps").textContent       = c.fps != null ? c.fps + " fps" : "\u2014";
+            $("cfg-vision").textContent = c.vision || "\u2014";
+            $("cfg-target").textContent = c.target_label || "\u2014";
+            $("cfg-conf").textContent =
+              c.confidence_threshold != null
+                ? (c.confidence_threshold * 100).toFixed(0) + "%"
+                : "\u2014";
+            $("cfg-estimator").textContent = c.estimator || "\u2014";
+            $("cfg-motor").textContent = c.motor || "\u2014";
+            $("cfg-serial").textContent = c.serial_port || "\u2014";
+            $("cfg-fps").textContent =
+              c.fps != null ? c.fps + " fps" : "\u2014";
           })
           .catch(function () {}); // not yet connected — silently ignore
       })();

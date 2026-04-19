@@ -12,6 +12,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <iostream>
 #include <sstream>
@@ -100,6 +101,26 @@ void StreamServer::pushFrame(const cv::Mat& frame, int jpeg_quality) {
         ++frame_seq_;
     }
     frame_cv_.notify_all();
+
+    // Write to recording if active
+    if (recording_ && !frame.empty()) {
+        std::lock_guard<std::mutex> lk(record_mutex_);
+        if (!video_writer_.isOpened()) {
+            int fourcc = cv::VideoWriter::fourcc('m','p','4','v');
+            video_writer_.open(record_path_, fourcc, 30.0,
+                               cv::Size(frame.cols, frame.rows));
+            if (!video_writer_.isOpened()) {
+                // Fallback to MJPEG in AVI container (universally supported)
+                record_path_ = "/tmp/tracker_recording.avi";
+                fourcc = cv::VideoWriter::fourcc('M','J','P','G');
+                video_writer_.open(record_path_, fourcc, 30.0,
+                                   cv::Size(frame.cols, frame.rows));
+            }
+        }
+        if (video_writer_.isOpened()) {
+            video_writer_.write(frame);
+        }
+    }
 }
 
 void StreamServer::pushTelemetry(const TelemetryData& data) {
@@ -139,11 +160,13 @@ void StreamServer::handleClient(int fd) {
     ssize_t n = ::recv(fd, buf, sizeof(buf) - 1, 0);
     if (n <= 0) return;
 
-    // Extract the request path from "GET /path HTTP/1.x"
+    // Extract the HTTP method and request path from "METHOD /path HTTP/1.x"
     std::string req(buf, static_cast<size_t>(n));
-    std::string path = "/";
+    std::string method = "GET";
+    std::string path   = "/";
     auto sp1 = req.find(' ');
     if (sp1 != std::string::npos) {
+        method = req.substr(0, sp1);
         auto sp2 = req.find(' ', sp1 + 1);
         if (sp2 != std::string::npos)
             path = req.substr(sp1 + 1, sp2 - sp1 - 1);
@@ -160,6 +183,12 @@ void StreamServer::handleClient(int fd) {
         serveSSE(fd);
     } else if (path == "/config") {
         serveConfig(fd);
+    } else if (path == "/record/start" && method == "POST") {
+        serveRecordStart(fd);
+    } else if (path == "/record/stop" && method == "POST") {
+        serveRecordStop(fd);
+    } else if (path == "/record/download" && method == "GET") {
+        serveRecordDownload(fd);
     } else {
         serve404(fd);
     }
@@ -170,7 +199,9 @@ void StreamServer::handleClient(int fd) {
 bool StreamServer::writeAll(int fd, const void* buf, size_t len) {
     const char* p = static_cast<const char*>(buf);
     while (len > 0) {
-        ssize_t written = ::write(fd, p, len);
+        // MSG_NOSIGNAL: return EPIPE instead of raising SIGPIPE when the
+        // client closes the connection mid-transfer (e.g. after a download).
+        ssize_t written = ::send(fd, p, len, MSG_NOSIGNAL);
         if (written <= 0) return false;
         p   += written;
         len -= static_cast<size_t>(written);
@@ -275,6 +306,101 @@ void StreamServer::serveConfig(int fd) {
     std::string h = hdr.str();
     writeAll(fd, h.data(), h.size());
     writeAll(fd, body.data(), body.size());
+}
+
+// ── recording ────────────────────────────────────────────────────────────────
+
+void StreamServer::startRecording() {
+    std::lock_guard<std::mutex> lk(record_mutex_);
+    if (video_writer_.isOpened()) video_writer_.release();
+    record_path_ = "/tmp/tracker_recording.mp4";
+    recording_   = true;
+}
+
+void StreamServer::stopRecording() {
+    recording_ = false;
+    std::lock_guard<std::mutex> lk(record_mutex_);
+    if (video_writer_.isOpened()) video_writer_.release();
+}
+
+void StreamServer::serveRecordStart(int fd) {
+    startRecording();
+    const char* body = "{\"recording\":true}";
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: application/json\r\n"
+        << "Content-Length: " << strlen(body) << "\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, body, strlen(body));
+    std::cout << "[StreamServer] Recording started → " << record_path_ << "\n";
+}
+
+void StreamServer::serveRecordStop(int fd) {
+    stopRecording();
+    const char* body = "{\"recording\":false}";
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: application/json\r\n"
+        << "Content-Length: " << strlen(body) << "\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, body, strlen(body));
+    std::cout << "[StreamServer] Recording stopped → " << record_path_ << "\n";
+}
+
+void StreamServer::serveRecordDownload(int fd) {
+    if (recording_) {
+        // Cannot download while recording is in progress
+        const char* body = "{\"error\":\"Recording in progress\"}";
+        std::ostringstream hdr;
+        hdr << "HTTP/1.1 409 Conflict\r\n"
+            << "Content-Type: application/json\r\n"
+            << "Content-Length: " << strlen(body) << "\r\n"
+            << "Connection: close\r\n\r\n";
+        std::string h = hdr.str();
+        writeAll(fd, h.data(), h.size());
+        writeAll(fd, body, strlen(body));
+        return;
+    }
+    if (record_path_.empty()) { serve404(fd); return; }
+
+    std::FILE* f = std::fopen(record_path_.c_str(), "rb");
+    if (!f) { serve404(fd); return; }
+
+    std::fseek(f, 0, SEEK_END);
+    long file_size = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    if (file_size <= 0) { std::fclose(f); serve404(fd); return; }
+
+    // Derive filename and content-type from extension
+    std::string fname = "tracker_recording.mp4";
+    std::string ctype = "video/mp4";
+    if (record_path_.size() >= 4 &&
+        record_path_.substr(record_path_.size() - 4) == ".avi") {
+        fname = "tracker_recording.avi";
+        ctype = "video/x-msvideo";
+    }
+
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: " << ctype << "\r\n"
+        << "Content-Length: " << file_size << "\r\n"
+        << "Content-Disposition: attachment; filename=\"" << fname << "\"\r\n"
+        << "Connection: close\r\n\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+
+    std::vector<char> chunk(65536);
+    std::size_t rd;
+    while ((rd = std::fread(chunk.data(), 1, chunk.size(), f)) > 0) {
+        if (!writeAll(fd, chunk.data(), rd)) break;
+    }
+    std::fclose(f);
 }
 
 void StreamServer::serve404(int fd) {
