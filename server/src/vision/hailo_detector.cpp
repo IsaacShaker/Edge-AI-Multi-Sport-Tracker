@@ -1,13 +1,42 @@
+/**
+ * hailo_detector.cpp
+ *
+ * Uses the HailoRT high-level InferModel API — the same API used by the
+ * official picamera2 Hailo class and all Raspberry Pi AI Kit examples.
+ *
+ * The old VStreams API (VStreamsBuilder + InputVStream/OutputVStream) was
+ * replaced because it consistently returns empty output buffers on HailoRT
+ * 4.23 when the HEF uses the NMS_BY_CLASS output format.
+ *
+ * Flow mirrors picamera2/devices/hailo/hailo.py:
+ *   VDevice::create_infer_model() → InferModel::configure()
+ *   → ConfiguredInferModel::create_bindings() → run() per frame
+ */
+
 #include "../include/vision/hailo_detector.h"
 #include <iostream>
-#include <chrono>
 #include <algorithm>
+#include <sys/mman.h>
 #include <cstring>
 #include <opencv2/opencv.hpp>
 
+// Mirrors page_aligned_alloc() from the official Hailo Application Code Examples
+// (hailo_infer.cpp). HailoRT DMA requires output buffers to be PAGE_SIZE-aligned;
+// using a plain std::vector causes silent write failures (all-zero output).
+static std::shared_ptr<uint8_t> page_aligned_alloc(size_t size) {
+    auto addr = mmap(nullptr, size, PROT_WRITE | PROT_READ,
+                     MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    if (MAP_FAILED == addr) throw std::bad_alloc();
+    return std::shared_ptr<uint8_t>(
+        reinterpret_cast<uint8_t*>(addr),
+        [size](void* p){ munmap(p, size); }
+    );
+}
+
 namespace tracker {
 
-// Shared with yolo_detector.cpp — same COCO 80 class list
+// ── COCO 80 class names ───────────────────────────────────────────────────────
+
 const std::vector<std::string> HailoDetector::kCocoClassNames = {
     "person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train",
     "truck", "boat", "traffic light", "fire hydrant", "stop sign",
@@ -29,7 +58,7 @@ const std::vector<std::string> HailoDetector::kCocoClassNames = {
 bool HailoDetector::initialize(const Config& config) {
     config_ = static_cast<const VisionConfig&>(config);
 
-    // Resolve target class index for fast per-anchor filtering
+    // Resolve target class index
     target_class_id_ = -1;
     for (int i = 0; i < static_cast<int>(kCocoClassNames.size()); ++i) {
         if (kCocoClassNames[i] == config_.target_label) {
@@ -43,7 +72,7 @@ bool HailoDetector::initialize(const Config& config) {
         return false;
     }
 
-    // ── Create virtual device (connects to the first Hailo-8/8L on the bus) ──
+    // ── Create VDevice (default params include round-robin scheduler) ──────────
     auto vdevice_result = hailort::VDevice::create();
     if (!vdevice_result) {
         std::cerr << "[HailoDetector] Failed to create VDevice: "
@@ -52,84 +81,61 @@ bool HailoDetector::initialize(const Config& config) {
     }
     vdevice_ = vdevice_result.release();
 
-    // ── Load HEF ──────────────────────────────────────────────────────────────
-    auto hef_result = hailort::Hef::create(config_.model_path);
-    if (!hef_result) {
-        std::cerr << "[HailoDetector] Failed to load HEF '" << config_.model_path
-                  << "': " << hef_result.status() << std::endl;
+    // ── create_infer_model (high-level API — mirrors picamera2 Hailo class) ───
+    auto infer_model_result = vdevice_->create_infer_model(config_.model_path);
+    if (!infer_model_result) {
+        std::cerr << "[HailoDetector] Failed to create InferModel from '"
+                  << config_.model_path << "': "
+                  << infer_model_result.status() << std::endl;
         return false;
     }
-    auto hef = hef_result.release();
+    infer_model_ = infer_model_result.release();
+    infer_model_->set_batch_size(1);
 
-    // ── Configure network group ────────────────────────────────────────────────
-    auto configure_params = vdevice_->create_configure_params(hef);
-    if (!configure_params) {
-        std::cerr << "[HailoDetector] Failed to create configure params: "
-                  << configure_params.status() << std::endl;
-        return false;
+    // Read input shape from InferModel's input stream BEFORE configure()
+    {
+        auto in_shape = infer_model_->input()->shape();
+        model_input_h_ = static_cast<int>(in_shape.height);
+        model_input_w_ = static_cast<int>(in_shape.width);
     }
 
-    auto network_groups_result = vdevice_->configure(hef, configure_params.value());
-    if (!network_groups_result || network_groups_result->empty()) {
-        std::cerr << "[HailoDetector] Failed to configure network group" << std::endl;
-        return false;
-    }
-    network_group_ = network_groups_result.value()[0];
-
-    // ── Create vstreams ────────────────────────────────────────────────────────
-    auto input_params  = network_group_->make_input_vstream_params(
-        false, HAILO_FORMAT_TYPE_FLOAT32,
-        HAILO_DEFAULT_VSTREAM_TIMEOUT_MS, HAILO_DEFAULT_VSTREAM_QUEUE_SIZE);
-    auto output_params = network_group_->make_output_vstream_params(
-        false, HAILO_FORMAT_TYPE_FLOAT32,
-        HAILO_DEFAULT_VSTREAM_TIMEOUT_MS, HAILO_DEFAULT_VSTREAM_QUEUE_SIZE);
-
-    if (!input_params || !output_params) {
-        std::cerr << "[HailoDetector] Failed to create vstream params" << std::endl;
-        return false;
-    }
-
-    auto input_streams_result  = hailort::VStreamsBuilder::create_input_vstreams(
-        *network_group_, input_params.value());
-    auto output_streams_result = hailort::VStreamsBuilder::create_output_vstreams(
-        *network_group_, output_params.value());
-
-    if (!input_streams_result || !output_streams_result) {
-        std::cerr << "[HailoDetector] Failed to create vstreams" << std::endl;
-        return false;
-    }
-
-    input_streams_  = input_streams_result.release();
-    output_streams_ = output_streams_result.release();
-
-    // Read actual input dimensions from HEF
-    if (!input_streams_.empty()) {
-        const auto& shape = input_streams_[0].get_info().shape;
-        model_input_h_ = static_cast<int>(shape.height);
-        model_input_w_ = static_cast<int>(shape.width);
-    }
-
-    // Detect output format: NMS-embedded vs raw anchor grids.
-    // HAILO_FORMAT_ORDER_HAILO_NMS means the HEF already ran box decoding +
-    // NMS and outputs detections organised by class.  This is the format used
-    // by all standard Hailo Model Zoo detection HEFs (e.g. yolov8n.hef).
-    if (!output_streams_.empty()) {
-        const auto& info = output_streams_[0].get_info();
-        if (info.format.order == HAILO_FORMAT_ORDER_HAILO_NMS) {
-            is_nms_output_   = true;
-            nms_num_classes_ = static_cast<int>(info.nms_shape.number_of_classes);
-            nms_max_bboxes_  = static_cast<int>(info.nms_shape.max_bboxes_per_class);
-            std::cout << "[HailoDetector] Output format : NMS (" << nms_num_classes_
-                      << " classes, " << nms_max_bboxes_ << " max bboxes/class)" << std::endl;
-        } else {
-            std::cout << "[HailoDetector] Output format : raw anchor grids" << std::endl;
+    // Read NMS shape and per-output buffer sizes BEFORE configure()
+    {
+        auto nms_shape_result = infer_model_->output()->get_nms_shape();
+        if (nms_shape_result) {
+            nms_num_classes_ = static_cast<int>(nms_shape_result->number_of_classes);
+            nms_max_bboxes_  = static_cast<int>(nms_shape_result->max_bboxes_per_class);
         }
+        output_buf_size_ = infer_model_->output()->get_frame_size();
+    }
+    output_buf_ptr_ = page_aligned_alloc(output_buf_size_);
+    std::memset(output_buf_ptr_.get(), 0, output_buf_size_);
+
+    // Match input format to what the HEF expects (usually UINT8)
+    infer_model_->input()->set_format_type(infer_model_->input()->format().type);
+
+    // Request FLOAT32 outputs — same as picamera2
+    // output() returns a mutable Expected<InferStream> on the InferModel
+    for (const auto& name : infer_model_->get_output_names()) {
+        infer_model_->output(name)->set_format_type(HAILO_FORMAT_TYPE_FLOAT32);
     }
 
-    std::cout << "[HailoDetector] HEF loaded: " << config_.model_path << std::endl;
-    std::cout << "[HailoDetector] Input size : "
+    // ── configure() ───────────────────────────────────────────────────────────
+    auto configured_result = infer_model_->configure();
+    if (!configured_result) {
+        std::cerr << "[HailoDetector] Failed to configure InferModel: "
+                  << configured_result.status() << std::endl;
+        return false;
+    }
+    configured_model_ = std::move(configured_result.value());
+
+    std::cout << "[HailoDetector] HEF loaded   : " << config_.model_path << std::endl;
+    std::cout << "[HailoDetector] Input size   : "
               << model_input_w_ << "x" << model_input_h_ << std::endl;
-    std::cout << "[HailoDetector] Target     : '" << config_.target_label << "'" << std::endl;
+    std::cout << "[HailoDetector] NMS classes  : " << nms_num_classes_
+              << "  max_bboxes/class: " << nms_max_bboxes_ << std::endl;
+    std::cout << "[HailoDetector] Target label : '" << config_.target_label
+              << "'  (class id " << target_class_id_ << ")" << std::endl;
 
     ready_ = true;
     return true;
@@ -144,229 +150,98 @@ std::vector<Detection> HailoDetector::detect(
 ) {
     if (!ready_) return {};
 
-    // ── Pre-process: resize to model input size, normalise to [0,1] float32 ──
-    cv::Mat frame(height, width, CV_8UC3, const_cast<void*>(frame_data));
-    cv::Mat resized;
-    cv::resize(frame, resized, cv::Size(model_input_w_, model_input_h_));
+    // Resize + BGR→RGB, raw uint8 (HEF bakes normalisation)
+    cv::Mat rgb = prepareInput(frame_data, width, height, model_input_w_, model_input_h_);
 
-    // Convert BGR uint8 → RGB float32 [0,1] in HWC layout
-    cv::Mat rgb_f32;
-    cv::cvtColor(resized, rgb_f32, cv::COLOR_BGR2RGB);
-    rgb_f32.convertTo(rgb_f32, CV_32F, 1.0 / 255.0);
+    // Build bindings with our pre-allocated output buffer
+    const auto& out_name = infer_model_->get_output_names()[0];
+    std::map<std::string, hailort::MemoryView> buf_map;
+    buf_map[out_name] = hailort::MemoryView(output_buf_ptr_.get(), output_buf_size_);
 
-    // Flatten to a contiguous float buffer
-    std::vector<float> input_data(
-        reinterpret_cast<const float*>(rgb_f32.datastart),
-        reinterpret_cast<const float*>(rgb_f32.dataend));
+    auto bindings_result = configured_model_.create_bindings(buf_map);
+    if (!bindings_result) {
+        std::cerr << "[HailoDetector] create_bindings failed: "
+                  << bindings_result.status() << std::endl;
+        return {};
+    }
+    auto& bindings = bindings_result.value();
 
-    // ── Write input to NPU ────────────────────────────────────────────────────
-    auto write_status = input_streams_[0].write(
-        hailort::MemoryView(input_data.data(),
-                            input_data.size() * sizeof(float)));
-    if (write_status != HAILO_SUCCESS) {
-        std::cerr << "[HailoDetector] write failed: " << write_status << std::endl;
+    // Set input buffer
+    auto status = bindings.input()->set_buffer(
+        hailort::MemoryView(rgb.data,
+                            static_cast<size_t>(rgb.total() * rgb.elemSize())));
+    if (status != HAILO_SUCCESS) {
+        std::cerr << "[HailoDetector] set_buffer (input) failed: " << status << std::endl;
         return {};
     }
 
-    // ── Read all output heads ─────────────────────────────────────────────────
-    // Use get_frame_size() for buffer allocation — shape fields are not valid
-    // for NMS-format outputs (they use nms_shape instead).
-    std::vector<std::vector<float>> raw_outputs;
-    std::vector<std::pair<int,int>>  grid_sizes;
-
-    for (auto& out_stream : output_streams_) {
-        const auto&  info        = out_stream.get_info();
-        const size_t frame_bytes = out_stream.get_frame_size();
-        std::vector<float> buf(frame_bytes / sizeof(float));
-
-        auto read_status = out_stream.read(
-            hailort::MemoryView(buf.data(), frame_bytes));
-        if (read_status != HAILO_SUCCESS) {
-            std::cerr << "[HailoDetector] read failed: " << read_status << std::endl;
-            return {};
-        }
-
-        raw_outputs.push_back(std::move(buf));
-        grid_sizes.emplace_back(
-            static_cast<int>(info.shape.height),
-            static_cast<int>(info.shape.width));
+    // Synchronous inference (mirrors picamera2 Hailo.run())
+    status = configured_model_.run(bindings, std::chrono::milliseconds(1000));
+    if (status != HAILO_SUCCESS) {
+        std::cerr << "[HailoDetector] run() failed: " << status << std::endl;
+        return {};
     }
 
-    // Route to the correct postprocessor based on HEF output format
-    if (is_nms_output_) {
-        return postprocessNMS(raw_outputs[0], width, height);
-    }
-    return postprocess(raw_outputs, grid_sizes, width, height);
+    return postprocessNMS(width, height);
 }
 
 // ── shutdown ──────────────────────────────────────────────────────────────────
 
 void HailoDetector::shutdown() {
-    input_streams_.clear();
-    output_streams_.clear();
-    network_group_.reset();
+    if (ready_) {
+        configured_model_.shutdown();
+    }
+    infer_model_.reset();
     vdevice_.reset();
     ready_ = false;
 }
 
 // ── postprocessNMS ────────────────────────────────────────────────────────────
-// Decodes HAILO_FORMAT_ORDER_HAILO_NMS output (NMS already performed in HEF).
-//
-// Buffer layout per class (float32):
-//   [count]  [y_min, x_min, y_max, x_max, score] × max_bboxes
-//
-// Coordinates are normalised to [0, 1] relative to model input.
+// HAILO_FORMAT_ORDER_HAILO_NMS_BY_CLASS (format order 22) layout (FLOAT32):
+//   Packed: for each class c in [0, num_classes):
+//     [float32 bbox_count][hailo_bbox_float32_t × bbox_count]
+//   Each hailo_bbox_float32_t = {y_min, x_min, y_max, x_max, score} (5 floats).
+//   Layout is variable-stride/packed — NOT padded to max_bboxes per class.
+//   This matches parse_nms_data() in the Hailo Application Code Examples utils.cpp.
 
 std::vector<Detection> HailoDetector::postprocessNMS(
-    const std::vector<float>& raw,
     int frame_width,
     int frame_height
 ) {
-    const int stride = 1 + nms_max_bboxes_ * 5; // float32 slots per class
-
-    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-
-    std::vector<Detection> detections;
-
-    for (int c = 0; c < nms_num_classes_; ++c) {
-        if (target_class_id_ >= 0 && c != target_class_id_) continue;
-
-        const float* cls_ptr = raw.data() + c * stride;
-        const int    count   = static_cast<int>(cls_ptr[0]);
-        if (count <= 0) continue;
-
-        const float* bbox = cls_ptr + 1;
-        for (int b = 0; b < std::min(count, nms_max_bboxes_); ++b, bbox += 5) {
-            const float score = bbox[4];
-            if (score < config_.confidence_threshold) continue;
-
-            // Hailo NMS order: y_min, x_min, y_max, x_max (normalised [0,1])
-            const float x1 = bbox[1] * static_cast<float>(frame_width);
-            const float y1 = bbox[0] * static_cast<float>(frame_height);
-            const float x2 = bbox[3] * static_cast<float>(frame_width);
-            const float y2 = bbox[2] * static_cast<float>(frame_height);
-
-            Detection det;
-            det.bbox.x       = (x1 + x2) / 2.0f;
-            det.bbox.y       = (y1 + y2) / 2.0f;
-            det.bbox.width   = x2 - x1;
-            det.bbox.height  = y2 - y1;
-            det.center.x     = det.bbox.x;
-            det.center.y     = det.bbox.y;
-            det.radius       = std::min(det.bbox.width, det.bbox.height) / 2.0f;
-            det.confidence   = score;
-            det.has_bbox     = true;
-            det.timestamp_ms = now_ms;
-            det.label        = (c >= 0 && c < static_cast<int>(kCocoClassNames.size()))
-                               ? kCocoClassNames[c] : config_.target_label;
-            detections.push_back(det);
-        }
-    }
-
-    return detections;
-}
-
-// ── postprocess ───────────────────────────────────────────────────────────────
-// Each Hailo output vstream for a YOLOv8 HEF has shape [grid_h, grid_w, 4+classes].
-// We flatten all three scale heads, run NMS, and return Detections.
-
-std::vector<Detection> HailoDetector::postprocess(
-    const std::vector<std::vector<float>>& raw_outputs,
-    const std::vector<std::pair<int,int>>&  grid_sizes,
-    int frame_width,
-    int frame_height
-) {
-    const float x_scale = static_cast<float>(frame_width)  / model_input_w_;
-    const float y_scale = static_cast<float>(frame_height) / model_input_h_;
-    const int   num_classes = static_cast<int>(kCocoClassNames.size()); // 80
+    const uint8_t* data   = output_buf_ptr_.get();
+    size_t         offset = 0;
 
     std::vector<cv::Rect> boxes;
     std::vector<float>    confidences;
     std::vector<int>      class_ids;
 
-    for (size_t head = 0; head < raw_outputs.size(); ++head) {
-        const auto& buf    = raw_outputs[head];
-        const int   grid_h = grid_sizes[head].first;
-        const int   grid_w = grid_sizes[head].second;
-        const int   stride_h = model_input_h_ / grid_h;
-        const int   stride_w = model_input_w_ / grid_w;
-        const int   num_feat  = 4 + num_classes; // per anchor
+    for (int c = 0; c < nms_num_classes_; ++c) {
+        // Read detection count as float32 (packed, variable-stride layout)
+        float32_t count_f = 0.0f;
+        std::memcpy(&count_f, data + offset, sizeof(float32_t));
+        offset += sizeof(float32_t);
+        const int count = static_cast<int>(count_f);
 
-        const int num_anchors = grid_h * grid_w;
-        if (static_cast<int>(buf.size()) != num_anchors * num_feat) continue;
+        for (int b = 0; b < count; ++b) {
+            hailo_bbox_float32_t bbox{};
+            std::memcpy(&bbox, data + offset, sizeof(hailo_bbox_float32_t));
+            offset += sizeof(hailo_bbox_float32_t);
 
-        for (int i = 0; i < num_anchors; ++i) {
-            const float* row = buf.data() + i * num_feat;
+            if (target_class_id_ >= 0 && c != target_class_id_) continue;
+            if (bbox.score < config_.confidence_threshold) continue;
 
-            // YOLOv8 decode: cx,cy are relative to grid cell, wh are absolute in model coords
-            const int gy = i / grid_w;
-            const int gx = i % grid_w;
-
-            const float cx = (row[0] + gx) * stride_w;
-            const float cy = (row[1] + gy) * stride_h;
-            const float bw = row[2] * model_input_w_;
-            const float bh = row[3] * model_input_h_;
-
-            float max_score = 0.0f;
-            int   best_class = -1;
-
-            if (target_class_id_ >= 0) {
-                max_score  = row[4 + target_class_id_];
-                best_class = target_class_id_;
-            } else {
-                for (int c = 0; c < num_classes; ++c) {
-                    if (row[4 + c] > max_score) {
-                        max_score  = row[4 + c];
-                        best_class = c;
-                    }
-                }
-            }
-
-            if (max_score < config_.confidence_threshold) continue;
-
-            const int x1 = static_cast<int>((cx - bw / 2.0f) * x_scale);
-            const int y1 = static_cast<int>((cy - bh / 2.0f) * y_scale);
-            boxes.emplace_back(x1, y1,
-                               static_cast<int>(bw * x_scale),
-                               static_cast<int>(bh * y_scale));
-            confidences.push_back(max_score);
-            class_ids.push_back(best_class);
+            // NMS coordinates are normalised [0,1]: y_min, x_min, y_max, x_max
+            const int x1 = static_cast<int>(bbox.x_min * frame_width);
+            const int y1 = static_cast<int>(bbox.y_min * frame_height);
+            const int x2 = static_cast<int>(bbox.x_max * frame_width);
+            const int y2 = static_cast<int>(bbox.y_max * frame_height);
+            boxes.emplace_back(x1, y1, x2 - x1, y2 - y1);
+            confidences.push_back(bbox.score);
+            class_ids.push_back(c);
         }
     }
 
-    std::vector<int> nms_indices;
-    cv::dnn::NMSBoxes(boxes, confidences,
-                      config_.confidence_threshold, 0.45f,
-                      nms_indices);
-
-    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-
-    std::vector<Detection> detections;
-    detections.reserve(nms_indices.size());
-
-    for (int idx : nms_indices) {
-        const cv::Rect& box = boxes[idx];
-        Detection det;
-        det.bbox.x       = box.x + box.width  / 2.0f;
-        det.bbox.y       = box.y + box.height / 2.0f;
-        det.bbox.width   = static_cast<float>(box.width);
-        det.bbox.height  = static_cast<float>(box.height);
-        det.center.x     = det.bbox.x;
-        det.center.y     = det.bbox.y;
-        det.radius       = std::min(box.width, box.height) / 2.0f;
-        det.confidence   = confidences[idx];
-        det.has_bbox     = true;
-        det.timestamp_ms = now_ms;
-        const int cid    = class_ids[idx];
-        det.label = (cid >= 0 && cid < static_cast<int>(kCocoClassNames.size()))
-                    ? kCocoClassNames[cid]
-                    : config_.target_label;
-        detections.push_back(det);
-    }
-
-    return detections;
+    return buildDetections(boxes, confidences, class_ids, kCocoClassNames, config_.target_label);
 }
 
 } // namespace tracker

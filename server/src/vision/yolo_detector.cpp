@@ -207,30 +207,19 @@ std::vector<Detection> YOLODetector::postprocess(
                       config_.confidence_threshold, 0.45f,
                       nms_indices);
 
-    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-
-    std::vector<Detection> detections;
-    detections.reserve(nms_indices.size());
+    // Gather NMS survivors into flat vectors then delegate to base helper
+    std::vector<cv::Rect> nms_boxes;
+    std::vector<float>    nms_confs;
+    std::vector<int>      nms_ids;
+    nms_boxes.reserve(nms_indices.size());
+    nms_confs.reserve(nms_indices.size());
+    nms_ids.reserve(nms_indices.size());
     for (int idx : nms_indices) {
-        const cv::Rect& box = boxes[idx];
-        Detection det;
-        det.bbox.x       = box.x + box.width  / 2.0f;
-        det.bbox.y       = box.y + box.height / 2.0f;
-        det.bbox.width   = static_cast<float>(box.width);
-        det.bbox.height  = static_cast<float>(box.height);
-        det.center.x     = det.bbox.x;
-        det.center.y     = det.bbox.y;
-        det.radius       = std::min(box.width, box.height) / 2.0f;
-        det.confidence   = confidences[idx];
-        det.has_bbox     = true;
-        det.timestamp_ms = now_ms;
-        const int cid    = class_ids[idx];
-        det.label = (cid >= 0 && cid < static_cast<int>(class_names_.size()))
-                    ? class_names_[cid] : config_.target_label;
-        detections.push_back(det);
+        nms_boxes.push_back(boxes[idx]);
+        nms_confs.push_back(confidences[idx]);
+        nms_ids.push_back(class_ids[idx]);
     }
-    return detections;
+    return buildDetections(nms_boxes, nms_confs, nms_ids, class_names_, config_.target_label);
 }
 
 } // namespace tracker

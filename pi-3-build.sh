@@ -117,7 +117,7 @@ fi
 # The model detects all 80 COCO classes (including sports ball, class 32).
 if [ "$USE_HAILO" = "ON" ]; then
     HEF_MODEL="$MODELS_DIR/yolov8n.hef"
-    HEF_URL="https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v2.14.0/hailo8l/yolov8n.hef"
+    HEF_URL="https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v2.14.0/hailo8/yolov8n.hef"
     if [ ! -f "$HEF_MODEL" ] || [ "$(wc -c < "$HEF_MODEL")" -lt 100000 ]; then
         echo "=== Downloading YOLOv8n HEF for Hailo-8L ==="
         mkdir -p "$MODELS_DIR"
