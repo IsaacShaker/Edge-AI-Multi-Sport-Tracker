@@ -15,13 +15,12 @@ namespace tracker {
  * Uses the HailoRT C++ API to run a pre-compiled .hef model file on the
  * Hailo NPU.
  *
- * Expected HEF model: yolov8n_sports_ball (COCO, 640×640 input)
- * Output layers: the three YOLO decode heads (80×80, 40×40, 20×20).
+ * Supports two HEF output formats automatically:
+ *   NMS-embedded  — decoded detections by class (typical Hailo Model Zoo HEFs)
+ *   Raw anchor    — three YOLO decode heads (80×80, 40×40, 20×20)
  *
- * Pre-processing (resize + normalize to [0,1]) is done here in CPU before
- * DMAing the buffer to the NPU.  Post-processing (NMS) runs on CPU using
- * the same logic as YOLODetector so results are identical regardless of
- * which backend is active.
+ * Pre-processing (resize + normalize to [0,1]) runs on CPU before DMAing the
+ * buffer to the NPU.  For raw-anchor HEFs, NMS also runs on CPU.
  */
 class HailoDetector : public VisionDetectorBase {
 public:
@@ -56,12 +55,25 @@ private:
     static const std::vector<std::string> kCocoClassNames;
     int target_class_id_{-1};
 
+    // NMS output mode (set at initialize time by inspecting format.order)
+    bool is_nms_output_{false};
+    int  nms_num_classes_{80};
+    int  nms_max_bboxes_{100};
+
     /**
-     * @brief Run NMS on raw per-anchor scores and boxes to build Detections.
+     * @brief Decode Hailo NMS output (HAILO_FORMAT_ORDER_HAILO_NMS).
      *
-     * Each output vstream from a YOLOv8 HEF carries a flat float32 buffer
-     * whose layout is [num_anchors, 4 + num_classes] (same as ONNX before
-     * transpose).  This function decodes all three scale heads and merges them.
+     * Layout per class: [float32 count, y_min, x_min, y_max, x_max, score, ...]
+     * Coordinates are normalised to [0, 1].
+     */
+    std::vector<Detection> postprocessNMS(
+        const std::vector<float>& raw,
+        int frame_width,
+        int frame_height
+    );
+
+    /**
+     * @brief Decode raw per-anchor output (three YOLO scale heads).
      */
     std::vector<Detection> postprocess(
         const std::vector<std::vector<float>>& raw_outputs,

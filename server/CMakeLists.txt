@@ -37,6 +37,9 @@ if(WITH_HAILO)
     if(HailoRT_FOUND)
         message(STATUS "HailoRT found: ${HailoRT_VERSION}")
         add_compile_definitions(WITH_HAILO)
+        # HailoRT cmake config exposes an imported target; derive include/lib from it.
+        get_target_property(HailoRT_INCLUDE_DIRS HailoRT::libhailort INTERFACE_INCLUDE_DIRECTORIES)
+        set(HailoRT_LIBRARIES HailoRT::libhailort)
     else()
         # Fall back to searching header/lib manually under /usr/local
         find_path(HAILO_INCLUDE_DIR hailo/hailort.hpp PATHS /usr/local/include /usr/include)
@@ -156,6 +159,9 @@ target_link_libraries(tracker_server
     ${OpenCV_LIBS}
     Threads::Threads
 )
+if(WITH_HAILO)
+    target_link_libraries(tracker_server ${HailoRT_LIBRARIES})
+endif()
 
 # Tests
 if(BUILD_TESTS)

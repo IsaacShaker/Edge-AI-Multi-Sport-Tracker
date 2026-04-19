@@ -109,6 +109,23 @@ bool HailoDetector::initialize(const Config& config) {
         model_input_w_ = static_cast<int>(shape.width);
     }
 
+    // Detect output format: NMS-embedded vs raw anchor grids.
+    // HAILO_FORMAT_ORDER_HAILO_NMS means the HEF already ran box decoding +
+    // NMS and outputs detections organised by class.  This is the format used
+    // by all standard Hailo Model Zoo detection HEFs (e.g. yolov8n.hef).
+    if (!output_streams_.empty()) {
+        const auto& info = output_streams_[0].get_info();
+        if (info.format.order == HAILO_FORMAT_ORDER_HAILO_NMS) {
+            is_nms_output_   = true;
+            nms_num_classes_ = static_cast<int>(info.nms_shape.number_of_classes);
+            nms_max_bboxes_  = static_cast<int>(info.nms_shape.max_bboxes_per_class);
+            std::cout << "[HailoDetector] Output format : NMS (" << nms_num_classes_
+                      << " classes, " << nms_max_bboxes_ << " max bboxes/class)" << std::endl;
+        } else {
+            std::cout << "[HailoDetector] Output format : raw anchor grids" << std::endl;
+        }
+    }
+
     std::cout << "[HailoDetector] HEF loaded: " << config_.model_path << std::endl;
     std::cout << "[HailoDetector] Input size : "
               << model_input_w_ << "x" << model_input_h_ << std::endl;
@@ -152,18 +169,18 @@ std::vector<Detection> HailoDetector::detect(
     }
 
     // ── Read all output heads ─────────────────────────────────────────────────
-    // YOLOv8 HEF typically has three decode heads: 80×80, 40×40, 20×20
+    // Use get_frame_size() for buffer allocation — shape fields are not valid
+    // for NMS-format outputs (they use nms_shape instead).
     std::vector<std::vector<float>> raw_outputs;
     std::vector<std::pair<int,int>>  grid_sizes;
 
     for (auto& out_stream : output_streams_) {
-        const auto& info   = out_stream.get_info();
-        const size_t count = info.shape.height * info.shape.width
-                           * info.shape.features;
-        std::vector<float> buf(count);
+        const auto&  info        = out_stream.get_info();
+        const size_t frame_bytes = out_stream.get_frame_size();
+        std::vector<float> buf(frame_bytes / sizeof(float));
 
         auto read_status = out_stream.read(
-            hailort::MemoryView(buf.data(), buf.size() * sizeof(float)));
+            hailort::MemoryView(buf.data(), frame_bytes));
         if (read_status != HAILO_SUCCESS) {
             std::cerr << "[HailoDetector] read failed: " << read_status << std::endl;
             return {};
@@ -175,6 +192,10 @@ std::vector<Detection> HailoDetector::detect(
             static_cast<int>(info.shape.width));
     }
 
+    // Route to the correct postprocessor based on HEF output format
+    if (is_nms_output_) {
+        return postprocessNMS(raw_outputs[0], width, height);
+    }
     return postprocess(raw_outputs, grid_sizes, width, height);
 }
 
@@ -186,6 +207,64 @@ void HailoDetector::shutdown() {
     network_group_.reset();
     vdevice_.reset();
     ready_ = false;
+}
+
+// ── postprocessNMS ────────────────────────────────────────────────────────────
+// Decodes HAILO_FORMAT_ORDER_HAILO_NMS output (NMS already performed in HEF).
+//
+// Buffer layout per class (float32):
+//   [count]  [y_min, x_min, y_max, x_max, score] × max_bboxes
+//
+// Coordinates are normalised to [0, 1] relative to model input.
+
+std::vector<Detection> HailoDetector::postprocessNMS(
+    const std::vector<float>& raw,
+    int frame_width,
+    int frame_height
+) {
+    const int stride = 1 + nms_max_bboxes_ * 5; // float32 slots per class
+
+    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+
+    std::vector<Detection> detections;
+
+    for (int c = 0; c < nms_num_classes_; ++c) {
+        if (target_class_id_ >= 0 && c != target_class_id_) continue;
+
+        const float* cls_ptr = raw.data() + c * stride;
+        const int    count   = static_cast<int>(cls_ptr[0]);
+        if (count <= 0) continue;
+
+        const float* bbox = cls_ptr + 1;
+        for (int b = 0; b < std::min(count, nms_max_bboxes_); ++b, bbox += 5) {
+            const float score = bbox[4];
+            if (score < config_.confidence_threshold) continue;
+
+            // Hailo NMS order: y_min, x_min, y_max, x_max (normalised [0,1])
+            const float x1 = bbox[1] * static_cast<float>(frame_width);
+            const float y1 = bbox[0] * static_cast<float>(frame_height);
+            const float x2 = bbox[3] * static_cast<float>(frame_width);
+            const float y2 = bbox[2] * static_cast<float>(frame_height);
+
+            Detection det;
+            det.bbox.x       = (x1 + x2) / 2.0f;
+            det.bbox.y       = (y1 + y2) / 2.0f;
+            det.bbox.width   = x2 - x1;
+            det.bbox.height  = y2 - y1;
+            det.center.x     = det.bbox.x;
+            det.center.y     = det.bbox.y;
+            det.radius       = std::min(det.bbox.width, det.bbox.height) / 2.0f;
+            det.confidence   = score;
+            det.has_bbox     = true;
+            det.timestamp_ms = now_ms;
+            det.label        = (c >= 0 && c < static_cast<int>(kCocoClassNames.size()))
+                               ? kCocoClassNames[c] : config_.target_label;
+            detections.push_back(det);
+        }
+    }
+
+    return detections;
 }
 
 // ── postprocess ───────────────────────────────────────────────────────────────

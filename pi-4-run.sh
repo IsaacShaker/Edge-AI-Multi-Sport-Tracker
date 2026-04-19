@@ -51,7 +51,7 @@ source "$CONFIG_FILE"
 # Model paths — binary runs from server/build/bin/ and resolves ../../models/
 BUILD_MODELS_DIR="$SCRIPT_DIR/server/build/models"
 YOLO_MODEL="$BUILD_MODELS_DIR/yolov8n.onnx"
-HAILO_MODEL="$BUILD_MODELS_DIR/yolov8n_sports_ball.hef"
+HAILO_MODEL="$BUILD_MODELS_DIR/yolov8n.hef"
 
 # ── Argument parsing (overrides config values) ───────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -80,17 +80,28 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Build if necessary ────────────────────────────────────────────────────────
-if [ ! -f "$EXECUTABLE" ]; then
-    echo ">>> Binary not found — building project first..."
-    "$SCRIPT_DIR/pi-3-build.sh"
+# Rebuild when: binary missing, OR hailo requested but HEF not yet downloaded
+# (the latter means a prior non-hailo build exists and needs to be replaced).
+NEEDS_BUILD=false
+[ ! -f "$EXECUTABLE" ] && NEEDS_BUILD=true
+[ "$VISION" = "hailo" ] && [ ! -f "$HAILO_MODEL" ] && NEEDS_BUILD=true
+
+if [ "$NEEDS_BUILD" = true ]; then
+    if [ "$VISION" = "hailo" ]; then
+        echo ">>> Building with Hailo NPU support..."
+        "$SCRIPT_DIR/pi-3-build.sh" --hailo
+    else
+        echo ">>> Binary not found — building project first..."
+        "$SCRIPT_DIR/pi-3-build.sh"
+    fi
     echo ""
 fi
 
 # ── Select model path based on vision backend ────────────────────────────────
 if [ "$VISION" = "hailo" ]; then
     if [ ! -f "$HAILO_MODEL" ]; then
-        echo "ERROR: Hailo HEF model not found at $HAILO_MODEL"
-        echo "       Compile your model with Hailo Model Zoo and place it at that path."
+        echo "ERROR: Hailo HEF model still not found at $HAILO_MODEL after build."
+        echo "       Compile manually with the Hailo Model Zoo and place it there."
         exit 1
     fi
 elif [ "$VISION" = "color_based" ]; then
@@ -154,9 +165,12 @@ fi
 # Silence GStreamer debug noise; set to 2 for troubleshooting pipeline issues
 export GST_DEBUG=0
 export G_MESSAGES_DEBUG=""
-# Do NOT prepend /usr/local/lib here — it may contain an older OpenCV build
+# HailoRT shared library lives in /usr/local/lib — add it when running hailo.
+if [ "$VISION" = "hailo" ]; then
+    export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH:-}"
+fi
+# Do NOT prepend /usr/local/lib globally here — it may contain an older OpenCV build
 # that would shadow the system 4.10.0 libs the binary was compiled against.
-# HailoRT libs (/usr/local/lib/libhailort.so) are added only when needed.
 export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 
 # ── Launch ────────────────────────────────────────────────────────────────────

@@ -112,6 +112,33 @@ else
     echo "YOLOv8n model already exists: $ONNX_MODEL"
 fi
 
+# ── Download Hailo HEF model if building with Hailo support ──────────────────
+# Pre-compiled yolov8n HEF for Hailo-8L from the Hailo Model Zoo S3 bucket.
+# The model detects all 80 COCO classes (including sports ball, class 32).
+if [ "$USE_HAILO" = "ON" ]; then
+    HEF_MODEL="$MODELS_DIR/yolov8n.hef"
+    HEF_URL="https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v2.14.0/hailo8l/yolov8n.hef"
+    if [ ! -f "$HEF_MODEL" ] || [ "$(wc -c < "$HEF_MODEL")" -lt 100000 ]; then
+        echo "=== Downloading YOLOv8n HEF for Hailo-8L ==="
+        mkdir -p "$MODELS_DIR"
+        if command -v curl &>/dev/null; then
+            curl -L "$HEF_URL" -o "$HEF_MODEL"
+        else
+            wget -q "$HEF_URL" -O "$HEF_MODEL"
+        fi
+        if [ ! -f "$HEF_MODEL" ] || [ "$(wc -c < "$HEF_MODEL")" -lt 100000 ]; then
+            echo ""
+            echo "WARNING: HEF download failed or file is too small."
+            echo "         Compile manually with the Hailo Model Zoo and place at:"
+            echo "         $HEF_MODEL"
+        else
+            echo "    HEF model saved to $HEF_MODEL"
+        fi
+    else
+        echo "YOLOv8n HEF model already exists: $HEF_MODEL"
+    fi
+fi
+
 echo ""
 echo "Next step:"
 echo "  ./pi-4-run.sh            # Run with Arducam (headless, no display)"
