@@ -567,9 +567,10 @@ void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
     if (result.has_detection) {
         // Draw bounding box
         if (result.detection.has_bbox) {
+            // bbox.x/y is the center; cv::Rect expects the top-left corner
             cv::Rect rect(
-                static_cast<int>(result.detection.bbox.x),
-                static_cast<int>(result.detection.bbox.y),
+                static_cast<int>(result.detection.bbox.x - result.detection.bbox.width  / 2.0f),
+                static_cast<int>(result.detection.bbox.y - result.detection.bbox.height / 2.0f),
                 static_cast<int>(result.detection.bbox.width),
                 static_cast<int>(result.detection.bbox.height)
             );
