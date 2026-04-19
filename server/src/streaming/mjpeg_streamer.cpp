@@ -13,7 +13,9 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <glob.h>
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -65,6 +67,19 @@ bool StreamServer::start(int port) {
     accept_thread_ = std::thread(&StreamServer::acceptLoop, this);
 
     std::cout << "[StreamServer] Listening on http://0.0.0.0:" << port_ << "\n";
+
+    // Clean up any leftover clip files from a previous crashed/interrupted session.
+    ::glob_t g{};
+    if (::glob("/tmp/tracker_clip_*.mp4", 0, nullptr, &g) == 0) {
+        for (size_t i = 0; i < g.gl_pathc; ++i) std::remove(g.gl_pathv[i]);
+    }
+    ::globfree(&g);
+    if (::glob("/tmp/tracker_clip_*.avi", 0, nullptr, &g) == 0) {
+        for (size_t i = 0; i < g.gl_pathc; ++i) std::remove(g.gl_pathv[i]);
+    }
+    ::globfree(&g);
+    std::remove("/tmp/tracker_recording_final.mp4");
+
     return true;
 }
 
@@ -102,16 +117,31 @@ void StreamServer::pushFrame(const cv::Mat& frame, int jpeg_quality) {
     }
     frame_cv_.notify_all();
 
-    // Write to recording if active
+    // Write to recording — rotate to a new clip every kClipDurationSecs seconds
     if (recording_ && !frame.empty()) {
         std::lock_guard<std::mutex> lk(record_mutex_);
+
+        auto now     = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                           now - clip_start_time_).count();
+
+        // Time to rotate: close current clip, start a new one
+        if (video_writer_.isOpened() && elapsed >= kClipDurationSecs) {
+            video_writer_.release();
+            clip_paths_.push_back(record_path_);
+            ++clip_index_;
+            record_path_     = "/tmp/tracker_clip_" + std::to_string(clip_index_) + ".mp4";
+            clip_start_time_ = now;
+        }
+
+        // Open writer on the first frame of each clip (lazy — need frame dims)
         if (!video_writer_.isOpened()) {
             int fourcc = cv::VideoWriter::fourcc('m','p','4','v');
             video_writer_.open(record_path_, fourcc, 30.0,
                                cv::Size(frame.cols, frame.rows));
             if (!video_writer_.isOpened()) {
-                // Fallback to MJPEG in AVI container (universally supported)
-                record_path_ = "/tmp/tracker_recording.avi";
+                // Fallback to MJPEG in AVI container
+                record_path_ = "/tmp/tracker_clip_" + std::to_string(clip_index_) + ".avi";
                 fourcc = cv::VideoWriter::fourcc('M','J','P','G');
                 video_writer_.open(record_path_, fourcc, 30.0,
                                    cv::Size(frame.cols, frame.rows));
@@ -313,14 +343,23 @@ void StreamServer::serveConfig(int fd) {
 void StreamServer::startRecording() {
     std::lock_guard<std::mutex> lk(record_mutex_);
     if (video_writer_.isOpened()) video_writer_.release();
-    record_path_ = "/tmp/tracker_recording.mp4";
-    recording_   = true;
+    // Delete leftover clips from any previous session
+    for (const auto& p : clip_paths_) std::remove(p.c_str());
+    std::remove("/tmp/tracker_recording_final.mp4");
+    clip_paths_.clear();
+    clip_index_      = 0;
+    clip_start_time_ = std::chrono::steady_clock::now();
+    record_path_     = "/tmp/tracker_clip_0.mp4";
+    recording_       = true;
 }
 
 void StreamServer::stopRecording() {
     recording_ = false;
     std::lock_guard<std::mutex> lk(record_mutex_);
-    if (video_writer_.isOpened()) video_writer_.release();
+    if (video_writer_.isOpened()) {
+        video_writer_.release();
+        clip_paths_.push_back(record_path_);  // finalize the last clip
+    }
 }
 
 void StreamServer::serveRecordStart(int fd) {
@@ -355,8 +394,7 @@ void StreamServer::serveRecordStop(int fd) {
 
 void StreamServer::serveRecordDownload(int fd) {
     if (recording_) {
-        // Cannot download while recording is in progress
-        const char* body = "{\"error\":\"Recording in progress\"}";
+        const char* body = "{\"error\":\"Recording in progress — stop first\"}";
         std::ostringstream hdr;
         hdr << "HTTP/1.1 409 Conflict\r\n"
             << "Content-Type: application/json\r\n"
@@ -367,9 +405,34 @@ void StreamServer::serveRecordDownload(int fd) {
         writeAll(fd, body, strlen(body));
         return;
     }
-    if (record_path_.empty()) { serve404(fd); return; }
 
-    std::FILE* f = std::fopen(record_path_.c_str(), "rb");
+    // Snapshot the completed clip list under the lock
+    std::vector<std::string> clips;
+    {
+        std::lock_guard<std::mutex> lk(record_mutex_);
+        clips = clip_paths_;
+    }
+    if (clips.empty()) { serve404(fd); return; }
+
+    // One clip → serve directly.  Multiple clips → stitch first (stream-copy,
+    // no re-encode, so this is fast even for 60+ clips).
+    std::string serve_path;
+    bool is_avi = false;
+    if (clips.size() == 1) {
+        serve_path = clips[0];
+        is_avi = serve_path.size() >= 4 &&
+                 serve_path.substr(serve_path.size() - 4) == ".avi";
+    } else {
+        serve_path = "/tmp/tracker_recording_final.mp4";
+        std::cout << "[StreamServer] Stitching " << clips.size()
+                  << " clip(s) → " << serve_path << "\n";
+        if (!stitchClips(clips, serve_path)) {
+            serve404(fd);
+            return;
+        }
+    }
+
+    std::FILE* f = std::fopen(serve_path.c_str(), "rb");
     if (!f) { serve404(fd); return; }
 
     std::fseek(f, 0, SEEK_END);
@@ -377,14 +440,8 @@ void StreamServer::serveRecordDownload(int fd) {
     std::fseek(f, 0, SEEK_SET);
     if (file_size <= 0) { std::fclose(f); serve404(fd); return; }
 
-    // Derive filename and content-type from extension
-    std::string fname = "tracker_recording.mp4";
-    std::string ctype = "video/mp4";
-    if (record_path_.size() >= 4 &&
-        record_path_.substr(record_path_.size() - 4) == ".avi") {
-        fname = "tracker_recording.avi";
-        ctype = "video/x-msvideo";
-    }
+    const std::string fname = is_avi ? "tracker_recording.avi" : "tracker_recording.mp4";
+    const std::string ctype = is_avi ? "video/x-msvideo" : "video/mp4";
 
     std::ostringstream hdr;
     hdr << "HTTP/1.1 200 OK\r\n"
@@ -401,6 +458,24 @@ void StreamServer::serveRecordDownload(int fd) {
         if (!writeAll(fd, chunk.data(), rd)) break;
     }
     std::fclose(f);
+}
+
+bool StreamServer::stitchClips(const std::vector<std::string>& clips,
+                                const std::string& output) {
+    // Write an ffmpeg concat list — one 'file' entry per clip
+    const std::string list_path = "/tmp/tracker_concat_list.txt";
+    std::FILE* lf = std::fopen(list_path.c_str(), "w");
+    if (!lf) return false;
+    for (const auto& p : clips)
+        std::fprintf(lf, "file '%s'\n", p.c_str());
+    std::fclose(lf);
+
+    // -c copy: stream-copy without re-encoding — very fast regardless of length
+    std::string cmd = "ffmpeg -y -f concat -safe 0 -i "
+                    + list_path + " -c copy " + output + " 2>/dev/null";
+    int ret = std::system(cmd.c_str());
+    std::remove(list_path.c_str());
+    return ret == 0;
 }
 
 void StreamServer::serve404(int fd) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -70,11 +71,16 @@ private:
     // Config JSON — set once at startup, served at /config
     std::string config_json_;
 
-    // Recording state
-    std::atomic<bool>  recording_{false};
-    std::mutex         record_mutex_;
-    cv::VideoWriter    video_writer_;
-    std::string        record_path_;
+    // Recording state — video is written to disk in kClipDurationSecs-second
+    // chunks so RAM usage stays flat even for hour-long recordings.
+    static constexpr int kClipDurationSecs = 60;
+    std::atomic<bool>                     recording_{false};
+    std::mutex                            record_mutex_;
+    cv::VideoWriter                       video_writer_;
+    std::string                           record_path_;   // current clip path
+    std::vector<std::string>              clip_paths_;    // completed clips
+    int                                   clip_index_{0};
+    std::chrono::steady_clock::time_point clip_start_time_;
 
     void acceptLoop();
     void handleClient(int fd);
@@ -88,6 +94,8 @@ private:
     void serve404(int fd);
     void startRecording();
     void stopRecording();
+    static bool stitchClips(const std::vector<std::string>& clips,
+                            const std::string& output);
 
     static bool        writeAll(int fd, const void* buf, size_t len);
     static std::string telemetryToJson(const TelemetryData& d);
