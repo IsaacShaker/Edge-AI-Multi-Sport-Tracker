@@ -317,6 +317,38 @@
             <span class="mv" id="fc">0</span>
           </div>
         </div>
+
+        <div class="card">
+          <h2>Configuration</h2>
+          <div class="mrow">
+            <span class="ml">Vision</span>
+            <span class="mv" id="cfg-vision">&mdash;</span>
+          </div>
+          <div class="mrow">
+            <span class="ml">Target</span>
+            <span class="mv" id="cfg-target">&mdash;</span>
+          </div>
+          <div class="mrow">
+            <span class="ml">Confidence</span>
+            <span class="mv" id="cfg-conf">&mdash;</span>
+          </div>
+          <div class="mrow">
+            <span class="ml">Estimator</span>
+            <span class="mv" id="cfg-estimator">&mdash;</span>
+          </div>
+          <div class="mrow">
+            <span class="ml">Motor</span>
+            <span class="mv" id="cfg-motor">&mdash;</span>
+          </div>
+          <div class="mrow">
+            <span class="ml">Serial port</span>
+            <span class="mv" id="cfg-serial">&mdash;</span>
+          </div>
+          <div class="mrow">
+            <span class="ml">Target FPS</span>
+            <span class="mv" id="cfg-fps">&mdash;</span>
+          </div>
+        </div>
       </div>
     </main>
 
@@ -389,6 +421,21 @@
         }
 
         connect();
+
+        // Fetch static config once on load and populate the Configuration card.
+        fetch("/config")
+          .then(function (r) { return r.json(); })
+          .then(function (c) {
+            $("cfg-vision").textContent    = c.vision        || "\u2014";
+            $("cfg-target").textContent    = c.target_label  || "\u2014";
+            $("cfg-conf").textContent      = c.confidence_threshold != null
+              ? (c.confidence_threshold * 100).toFixed(0) + "%" : "\u2014";
+            $("cfg-estimator").textContent = c.estimator     || "\u2014";
+            $("cfg-motor").textContent     = c.motor         || "\u2014";
+            $("cfg-serial").textContent    = c.serial_port   || "\u2014";
+            $("cfg-fps").textContent       = c.fps != null ? c.fps + " fps" : "\u2014";
+          })
+          .catch(function () {}); // not yet connected — silently ignore
       })();
     </script>
   </body>

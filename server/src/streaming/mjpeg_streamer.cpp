@@ -158,6 +158,8 @@ void StreamServer::handleClient(int fd) {
         serveMjpeg(fd);
     } else if (path == "/telemetry") {
         serveSSE(fd);
+    } else if (path == "/config") {
+        serveConfig(fd);
     } else {
         serve404(fd);
     }
@@ -255,6 +257,24 @@ void StreamServer::serveSSE(int fd) {
         std::string msg = "data: " + telemetryToJson(data) + "\n\n";
         if (!writeAll(fd, msg.data(), msg.size())) break;
     }
+}
+
+void StreamServer::setConfig(const std::string& json) {
+    config_json_ = json;
+}
+
+void StreamServer::serveConfig(int fd) {
+    const std::string& body = config_json_.empty() ? "{}" : config_json_;
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: application/json\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n"
+        << "\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, body.data(), body.size());
 }
 
 void StreamServer::serve404(int fd) {

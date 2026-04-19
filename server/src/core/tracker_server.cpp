@@ -86,6 +86,28 @@ bool TrackerServer::initialize(const ServerConfig& config) {
             std::cerr << "Warning: Failed to start stream server on port "
                       << config_.web_port << std::endl;
             stream_server_.reset();
+        } else {
+            // Serialize runtime config once so the dashboard /config endpoint
+            // can show it. Simple manual JSON — no library needed.
+            auto esc = [](const std::string& s) {
+                std::string out;
+                for (char c : s) {
+                    if (c == '"' || c == '\\') out += '\\';
+                    out += c;
+                }
+                return out;
+            };
+            std::ostringstream j;
+            j << "{"
+              << "\"vision\":\""              << esc(config_.vision.model_type)        << "\","
+              << "\"target_label\":\""        << esc(config_.vision.target_label)      << "\","
+              << "\"confidence_threshold\":"  << config_.vision.confidence_threshold   << ","
+              << "\"estimator\":\""           << esc(config_.estimator.estimator_type) << "\","
+              << "\"motor\":\""               << esc(config_.motor.controller_type)    << "\","
+              << "\"serial_port\":\""         << esc(config_.motor.serial_port)        << "\","
+              << "\"fps\":"                   << config_.target_fps
+              << "}";
+            stream_server_->setConfig(j.str());
         }
     }
 

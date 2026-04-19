@@ -14,45 +14,49 @@
 #   ./pi-4-run.sh [OPTIONS]
 #
 # Options:
-#   --vision TYPE      yolo | hailo | color_based  (default: yolo)
-#   --estimator TYPE   kalman_cv | kalman_ca | imm  (default: imm)
-#   --motor TYPE       mock | simplefoc             (default: mock)
-#   --serial-port DEV  Serial port for simplefoc    (default: /dev/ttyACM0)
-#   --width W          Capture width  in pixels     (default: 1280)
-#   --height H         Capture height in pixels     (default: 720)
-#   --fps F            Target frames per second      (default: 30)
+#   --config FILE      Path to config file           (default: tracker.conf)
+#   --vision TYPE      yolo | hailo | color_based    (default: from config)
+#   --estimator TYPE   kalman_cv | kalman_ca | imm   (default: from config)
+#   --motor TYPE       mock | simplefoc              (default: from config)
+#   --serial-port DEV  Serial port for simplefoc     (default: from config)
+#   --width W          Capture width  in pixels      (default: from config)
+#   --height H         Capture height in pixels      (default: from config)
+#   --fps F            Target frames per second       (default: from config)
 #   --display          Enable display window (requires monitor / X11)
 #   --no-viz           Disable display (headless mode)
 #   --web-stream       Enable web dashboard on port 8080
-#   --port P           Web streaming port           (default: 8080)
+#   --port P           Web streaming port            (default: from config)
 #   --help             Show this message
 
 set -e
 
-# ── Defaults ──────────────────────────────────────────────────────────────────
+# ── Paths ──────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/server/build"
 EXECUTABLE="$BUILD_DIR/bin/tracker_server"
 
-ESTIMATOR="imm"
-MOTOR="simplefoc"
-SERIAL_PORT="/dev/ttyACM0"
-VISION="yolo"
-CAP_WIDTH=1280
-CAP_HEIGHT=720
-CAP_FPS=30
-DISPLAY_ENABLED=true    # display enabled by default
-WEB_STREAM=false
-WEB_PORT=8080
+# ── Load config file (sets all defaults) ─────────────────────────────────────
+CONFIG_FILE="$SCRIPT_DIR/tracker.conf"
+# Allow --config to appear as the very first argument before sourcing
+if [[ "$1" == "--config" && -n "$2" ]]; then
+    CONFIG_FILE="$2"
+fi
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "ERROR: Config file not found: $CONFIG_FILE"
+    exit 1
+fi
+# shellcheck source=tracker.conf
+source "$CONFIG_FILE"
 
 # Model paths — binary runs from server/build/bin/ and resolves ../../models/
 BUILD_MODELS_DIR="$SCRIPT_DIR/server/build/models"
 YOLO_MODEL="$BUILD_MODELS_DIR/yolov8n.onnx"
 HAILO_MODEL="$BUILD_MODELS_DIR/yolov8n_sports_ball.hef"
 
-# ── Argument parsing ──────────────────────────────────────────────────────────
+# ── Argument parsing (overrides config values) ───────────────────────────────
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --config)     CONFIG_FILE="$2"; shift 2 ;;  # already handled above, skip
         --estimator)  ESTIMATOR="$2";    shift 2 ;;
         --motor)      MOTOR="$2";        shift 2 ;;
         --serial-port) SERIAL_PORT="$2"; shift 2 ;;
