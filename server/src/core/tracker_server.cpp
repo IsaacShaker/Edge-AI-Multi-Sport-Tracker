@@ -171,15 +171,47 @@ TrackerServer::Stats TrackerServer::getStats() const {
 void TrackerServer::detectLoop() {
     while (running_) {
         cv::Mat frame;
+        cv::Rect roi;
+        bool use_roi = false;
         {
             std::unique_lock<std::mutex> lk(frame_mutex_);
             frame_cv_.wait(lk, [this]{ return new_frame_ready_ || !running_; });
             if (!running_) break;
-            frame = pending_detect_frame_;   // lightweight ref-counted copy
+            frame   = pending_detect_frame_;   // lightweight ref-counted copy
+            roi     = pending_detect_roi_;
+            use_roi = pending_detect_use_roi_;
             new_frame_ready_ = false;
         }
 
-        auto dets = vision_->detect(frame.data, frame.cols, frame.rows);
+        std::vector<Detection> dets;
+        int roi_offset_x = 0;
+        int roi_offset_y = 0;
+
+        if (use_roi && roi.width > 0 && roi.height > 0) {
+            // Detect on the cropped ROI — much faster than full frame
+            cv::Mat crop = frame(roi).clone();
+            dets = vision_->detect(crop.data, crop.cols, crop.rows);
+
+            // Offset coordinates back to full-frame space
+            roi_offset_x = roi.x;
+            roi_offset_y = roi.y;
+            for (auto& d : dets) {
+                d.center.x += roi_offset_x;
+                d.center.y += roi_offset_y;
+                if (d.has_bbox) {
+                    d.bbox.x += roi_offset_x;
+                    d.bbox.y += roi_offset_y;
+                }
+            }
+
+            // Full-frame fallback: if ROI detect found nothing, try the whole frame
+            // so fast-moving objects that escaped the ROI are still caught.
+            if (dets.empty()) {
+                dets = vision_->detect(frame.data, frame.cols, frame.rows);
+            }
+        } else {
+            dets = vision_->detect(frame.data, frame.cols, frame.rows);
+        }
 
         {
             std::lock_guard<std::mutex> lk(detections_mutex_);
@@ -238,11 +270,13 @@ void TrackerServer::trackerLoop() {
             continue;
         }
 
-        // Feed latest frame to the async detection thread (non-blocking — drops
-        // frames that arrive while YOLO is still busy, always keeps newest).
+        // Feed latest frame + current ROI snapshot to the async detection thread
+        // (non-blocking — drops frames that arrive while YOLO is still busy).
         {
             std::lock_guard<std::mutex> lk(frame_mutex_);
-            pending_detect_frame_ = frame;
+            pending_detect_frame_   = frame;
+            pending_detect_roi_     = search_roi_;
+            pending_detect_use_roi_ = use_roi_;
             new_frame_ready_ = true;
         }
         frame_cv_.notify_one();
@@ -393,7 +427,7 @@ TrackerServer::TrackingResult TrackerServer::detectAndTrack(cv::Mat& frame) {
     result.has_detection = false;
     result.has_state = false;
     result.has_prediction = false;
-    result.roi_used = cv::Rect(0, 0, frame.cols, frame.rows);
+    result.roi_used = use_roi_ ? search_roi_ : cv::Rect(0, 0, frame.cols, frame.rows);
 
     // Pull the latest detections produced by the async detection thread.
     // When fresh_detections_ is false the detect thread is still busy — we

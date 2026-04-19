@@ -119,6 +119,8 @@ private:
     std::mutex frame_mutex_;
     std::condition_variable frame_cv_;
     cv::Mat pending_detect_frame_;
+    cv::Rect pending_detect_roi_;       // ROI snapshot passed to detect thread
+    bool pending_detect_use_roi_{false};
     bool new_frame_ready_{false};
     std::mutex detections_mutex_;
     std::vector<Detection> async_detections_;
