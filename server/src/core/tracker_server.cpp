@@ -92,6 +92,10 @@ bool TrackerServer::initialize(const ServerConfig& config) {
         std::cerr << "Failed to connect motor controller" << std::endl;
         return false;
     }
+
+    auto motor_status = motor_->getStatus();
+    current_pan_rad_ = motor_status.current_angles.pan;
+    current_tilt_rad_ = motor_status.current_angles.tilt;
     
     // Initialize prediction error logging
     prediction_log_.open("prediction_log.csv", std::ios::out | std::ios::trunc);

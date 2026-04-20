@@ -100,31 +100,46 @@ bool SimpleFOCController::connect() {
         std::cerr << "[SimpleFOCController] Warning: failed to enable motors" << std::endl;
     }
 
-    // Query actual encoder positions (X command) so current_angles starts from
-    // the real hardware state instead of (0, 0).
-    // Response format from firmware: "Top Position (Rads): X.XXX | Bottom Position (Rads): X.XXX"
     {
-        sendCommand("X");
-        // Read response line with a short timeout
+        sendCommand("Y");
+
         char buf[256] = {};
         int pos = 0;
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
-        while (std::chrono::steady_clock::now() < deadline) {
+        bool got_position = false;
+
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
+
+        while (std::chrono::steady_clock::now() < deadline && !got_position) {
             char c;
-            if (::read(serial_fd_, &c, 1) <= 0) continue;
+            int n = ::read(serial_fd_, &c, 1);
+            if (n <= 0) continue;
+
             if (c == '\n' || c == '\r') {
+                if (pos == 0) continue;   // ignore empty lines
                 buf[pos] = '\0';
+
+                std::cout << "[SimpleFOCController] RX: " << buf << std::endl;
+
                 float top = 0.0f, bottom = 0.0f;
-                if (sscanf(buf, "Top Position (Rads): %f | Bottom Position (Rads): %f", &top, &bottom) == 2) {
+                if (sscanf(buf, "Top Position (Rads): %f | Bottom Position (Rads): %f",
+                        &top, &bottom) == 2) {
                     std::lock_guard<std::mutex> lk(status_mutex_);
                     status_.current_angles = GimbalAngles(bottom, top);  // pan=bottom, tilt=top
+
                     std::cout << "[SimpleFOCController] Initial position: pan=" << bottom
-                              << " rad, tilt=" << top << " rad" << std::endl;
+                            << " rad, tilt=" << top << " rad" << std::endl;
+
+                    got_position = true;
                 }
-                break;
+
+                pos = 0;  // reset buffer for next line
             } else if (pos < static_cast<int>(sizeof(buf)) - 1) {
                 buf[pos++] = c;
             }
+        }
+
+        if (!got_position) {
+            std::cout << "[SimpleFOCController] Failed to fetch initial encoder position" << std::endl;
         }
     }
 
@@ -173,22 +188,22 @@ bool SimpleFOCController::setTargetAngles(const GimbalAngles& angles) {
     }
     
     // Clamp angles
-    float pan = clampAngle(angles.pan, config_.pan_min_rad, config_.pan_max_rad);
-    float tilt = clampAngle(angles.tilt, config_.tilt_min_rad, config_.tilt_max_rad);
+    // float pan = clampAngle(angles.pan, config_.pan_min_rad, config_.pan_max_rad);
+    // float tilt = clampAngle(angles.tilt, config_.tilt_min_rad, config_.tilt_max_rad);
     
-    status_.target_angles = GimbalAngles(pan, tilt);
+    status_.target_angles = GimbalAngles(angles.pan, angles.tilt);
     
     // Send both axes in a single "M<pan> <tilt>" command (absolute positions).
     // The M handler in the firmware sets target_angle_bottom/top directly —
     // no relative flag needed.
     char cmd[64];
-    snprintf(cmd, sizeof(cmd), "M%.4f %.4f", pan, tilt);
+    snprintf(cmd, sizeof(cmd), "M%.4f %.4f", angles.pan, angles.tilt);
     if (!sendCommand(cmd)) return false;
 
     // Optimistic position tracking: assume the position-controlled FOC motor
     // will reach the target.  When real encoder feedback is added to the
     // firmware, replace this line with a parsed readback instead.
-    status_.current_angles = GimbalAngles(pan, tilt);
+    status_.current_angles = GimbalAngles(angles.pan, angles.tilt);
     status_.is_moving = true;
     return true;
 }
