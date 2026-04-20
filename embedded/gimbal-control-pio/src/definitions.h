@@ -16,7 +16,8 @@
 // TELEMETRY
 //---------------------------------------
 
-#define POS_INTERVAL 10
+#define POS_INTERVAL PA_10
+#define ADC_RES 4095.0f
 
 //---------------------------------------
 // POWER SAFETY THRESHOLDS
@@ -68,7 +69,7 @@
 #define YAW_nRESET      PB12
 #define YAW_IN1         PA7   // TIM3_CH2
 #define YAW_IN2         PB0   // TIM3_CH3
-#define YAW_IN3         PB1   // TIM3_CH4
+#define YAW_IN3         PB1  // TIM3_CH4
 
 #define PITCH_nFAULT    PB14
 #define PITCH_EN        PB13

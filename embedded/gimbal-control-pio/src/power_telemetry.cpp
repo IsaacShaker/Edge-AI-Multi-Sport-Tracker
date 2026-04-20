@@ -9,15 +9,15 @@ const double G_IMON = 243; // uA per A
 
 //Finds the current passing through a sense resistor using the constant gain of 200 of the INA4180A4IPWR
 double currentSense(double V_ADC, double R_SENSE){
-    return V_ADC / ((R_SENSE) * gain);
+    return (3.3 * V_ADC) / ((R_SENSE) * gain);
 }
 
 //Calculates the voltage of the main supply rail using the known resistor divider values
 double systemVoltage(double V_SYS){
-    return V_SYS * ((R71 + R67) / R67);
+    return (3.3 * V_SYS * ((R71 + R67) / R67));
 }
 
 //Takes the buffered voltage from the TPS259830LNRGER IMON output to find the current supplied to the entire system
 double systemCurrent(double V_IMON){
-    return V_IMON / ((R_IMON) * G_IMON);
+    return (3.3 * V_IMON) / ((R_IMON) * G_IMON);
 }

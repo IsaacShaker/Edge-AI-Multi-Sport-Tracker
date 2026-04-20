@@ -6,22 +6,36 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>728</width>
-    <height>810</height>
+    <width>749</width>
+    <height>738</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Form</string>
   </property>
   <layout class="QGridLayout" name="gridLayout_2">
-   <item row="13" column="0" colspan="2">
+   <item row="7" column="0" colspan="2" alignment="Qt::AlignHCenter">
+    <widget class="QLabel" name="label_20">
+     <property name="font">
+      <font>
+       <pointsize>12</pointsize>
+       <weight>75</weight>
+       <bold>true</bold>
+      </font>
+     </property>
+     <property name="text">
+      <string>Test Programs</string>
+     </property>
+    </widget>
+   </item>
+   <item row="9" column="0" colspan="2">
     <widget class="Line" name="line_3">
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
      </property>
     </widget>
    </item>
-   <item row="12" column="0" colspan="2">
+   <item row="8" column="0" colspan="2">
     <layout class="QGridLayout" name="gridLayout_5">
      <item row="0" column="1">
       <widget class="QPushButton" name="testYawScan">
@@ -39,55 +53,34 @@
      </item>
     </layout>
    </item>
-   <item row="11" column="0" colspan="2" alignment="Qt::AlignHCenter">
-    <widget class="QLabel" name="label_20">
-     <property name="font">
-      <font>
-       <pointsize>12</pointsize>
-       <weight>75</weight>
-       <bold>true</bold>
-      </font>
-     </property>
-     <property name="text">
-      <string>Test Programs</string>
-     </property>
-    </widget>
-   </item>
-   <item row="10" column="0" colspan="2">
-    <widget class="Line" name="line_5">
-     <property name="orientation">
-      <enum>Qt::Horizontal</enum>
-     </property>
-    </widget>
-   </item>
-   <item row="5" column="0" colspan="2" alignment="Qt::AlignHCenter">
-    <widget class="QLabel" name="label_21">
-     <property name="font">
-      <font>
-       <pointsize>12</pointsize>
-       <weight>75</weight>
-       <bold>true</bold>
-      </font>
-     </property>
-     <property name="text">
-      <string>Power Readings</string>
-     </property>
-    </widget>
-   </item>
-   <item row="6" column="0">
-    <widget class="QLabel" name="label_22">
-     <property name="text">
-      <string>V_SYS</string>
-     </property>
-    </widget>
-   </item>
-   <item row="14" column="0" colspan="2">
-    <widget class="QTextBrowser" name="terminalOutput"/>
-   </item>
    <item row="2" column="0" colspan="2">
     <widget class="Line" name="line_4">
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
+     </property>
+    </widget>
+   </item>
+   <item row="10" column="0" colspan="2">
+    <widget class="QTextBrowser" name="terminalOutput"/>
+   </item>
+   <item row="4" column="0" colspan="2">
+    <widget class="Line" name="line_6">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+    </widget>
+   </item>
+   <item row="1" column="0" colspan="2" alignment="Qt::AlignHCenter">
+    <widget class="QLabel" name="label_13">
+     <property name="font">
+      <font>
+       <pointsize>14</pointsize>
+       <weight>75</weight>
+       <bold>true</bold>
+      </font>
+     </property>
+     <property name="text">
+      <string>MSAT Drive Board Debugger</string>
      </property>
     </widget>
    </item>
@@ -320,220 +313,6 @@
      </item>
      <item row="0" column="2">
       <layout class="QGridLayout" name="gridLayout_6">
-       <item row="9" column="1" alignment="Qt::AlignHCenter">
-        <widget class="QPushButton" name="setHome">
-         <property name="minimumSize">
-          <size>
-           <width>80</width>
-           <height>40</height>
-          </size>
-         </property>
-         <property name="maximumSize">
-          <size>
-           <width>80</width>
-           <height>40</height>
-          </size>
-         </property>
-         <property name="text">
-          <string>SET HOME</string>
-         </property>
-        </widget>
-       </item>
-       <item row="14" column="0" colspan="2" alignment="Qt::AlignHCenter">
-        <widget class="QPushButton" name="getSettings">
-         <property name="minimumSize">
-          <size>
-           <width>180</width>
-           <height>30</height>
-          </size>
-         </property>
-         <property name="maximumSize">
-          <size>
-           <width>180</width>
-           <height>50</height>
-          </size>
-         </property>
-         <property name="text">
-          <string>Return Settings</string>
-         </property>
-        </widget>
-       </item>
-       <item row="0" column="0" alignment="Qt::AlignTop">
-        <widget class="QLabel" name="label_11">
-         <property name="font">
-          <font>
-           <pointsize>12</pointsize>
-           <weight>75</weight>
-           <bold>true</bold>
-          </font>
-         </property>
-         <property name="text">
-          <string>General</string>
-         </property>
-        </widget>
-       </item>
-       <item row="9" column="0" alignment="Qt::AlignHCenter">
-        <widget class="QPushButton" name="homeMotors">
-         <property name="minimumSize">
-          <size>
-           <width>80</width>
-           <height>40</height>
-          </size>
-         </property>
-         <property name="maximumSize">
-          <size>
-           <width>80</width>
-           <height>40</height>
-          </size>
-         </property>
-         <property name="font">
-          <font>
-           <italic>false</italic>
-          </font>
-         </property>
-         <property name="text">
-          <string>HOME</string>
-         </property>
-        </widget>
-       </item>
-       <item row="5" column="0" colspan="2">
-        <spacer name="verticalSpacer_6">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
-         </property>
-         <property name="sizeType">
-          <enum>QSizePolicy::Fixed</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>20</width>
-           <height>10</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-       <item row="15" column="0" colspan="2" alignment="Qt::AlignHCenter">
-        <widget class="QPushButton" name="saveSettings">
-         <property name="minimumSize">
-          <size>
-           <width>180</width>
-           <height>30</height>
-          </size>
-         </property>
-         <property name="maximumSize">
-          <size>
-           <width>180</width>
-           <height>30</height>
-          </size>
-         </property>
-         <property name="text">
-          <string>SAVE SETTINGS</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="0" rowspan="2" colspan="2" alignment="Qt::AlignHCenter">
-        <widget class="QListView" name="comList">
-         <property name="minimumSize">
-          <size>
-           <width>80</width>
-           <height>50</height>
-          </size>
-         </property>
-         <property name="maximumSize">
-          <size>
-           <width>200</width>
-           <height>60</height>
-          </size>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="0" colspan="2">
-        <widget class="QLabel" name="label_12">
-         <property name="minimumSize">
-          <size>
-           <width>0</width>
-           <height>20</height>
-          </size>
-         </property>
-         <property name="maximumSize">
-          <size>
-           <width>16777215</width>
-           <height>20</height>
-          </size>
-         </property>
-         <property name="text">
-          <string>COM Selection</string>
-         </property>
-        </widget>
-       </item>
-       <item row="10" column="0" colspan="2" alignment="Qt::AlignHCenter">
-        <widget class="QPushButton" name="bothAngleSet">
-         <property name="minimumSize">
-          <size>
-           <width>180</width>
-           <height>30</height>
-          </size>
-         </property>
-         <property name="maximumSize">
-          <size>
-           <width>180</width>
-           <height>30</height>
-          </size>
-         </property>
-         <property name="text">
-          <string>TARGET BOTH</string>
-         </property>
-        </widget>
-       </item>
-       <item row="7" column="0" colspan="2" alignment="Qt::AlignHCenter">
-        <widget class="QPushButton" name="motorEN">
-         <property name="minimumSize">
-          <size>
-           <width>180</width>
-           <height>30</height>
-          </size>
-         </property>
-         <property name="maximumSize">
-          <size>
-           <width>180</width>
-           <height>30</height>
-          </size>
-         </property>
-         <property name="text">
-          <string>ENABLE MOTORS</string>
-         </property>
-         <property name="checkable">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item row="6" column="0" colspan="2">
-        <widget class="QLabel" name="label_16">
-         <property name="text">
-          <string>Positional</string>
-         </property>
-        </widget>
-       </item>
-       <item row="13" column="0" colspan="2">
-        <widget class="QLabel" name="label_17">
-         <property name="text">
-          <string>Global Settings</string>
-         </property>
-        </widget>
-       </item>
-       <item row="4" column="1">
-        <widget class="QPushButton" name="selectCOM">
-         <property name="maximumSize">
-          <size>
-           <width>92</width>
-           <height>40</height>
-          </size>
-         </property>
-         <property name="text">
-          <string>Select COM</string>
-         </property>
-        </widget>
-       </item>
        <item row="4" column="0">
         <widget class="QPushButton" name="refreshCOM">
          <property name="maximumSize">
@@ -547,23 +326,7 @@
          </property>
         </widget>
        </item>
-       <item row="12" column="0" colspan="2">
-        <spacer name="verticalSpacer_7">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
-         </property>
-         <property name="sizeType">
-          <enum>QSizePolicy::Fixed</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>20</width>
-           <height>10</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-       <item row="16" column="0" colspan="2">
+       <item row="17" column="0" colspan="2">
         <spacer name="verticalSpacer_5">
          <property name="orientation">
           <enum>Qt::Vertical</enum>
@@ -592,6 +355,258 @@
          </property>
          <property name="text">
           <string>LIVE RETURN POSITION</string>
+         </property>
+         <property name="checkable">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item row="15" column="0" colspan="2" alignment="Qt::AlignHCenter">
+        <widget class="QPushButton" name="getSettings">
+         <property name="minimumSize">
+          <size>
+           <width>180</width>
+           <height>30</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>180</width>
+           <height>50</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>Return Settings</string>
+         </property>
+        </widget>
+       </item>
+       <item row="5" column="0" colspan="2">
+        <spacer name="verticalSpacer_6">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeType">
+          <enum>QSizePolicy::Fixed</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>10</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item row="10" column="1" alignment="Qt::AlignHCenter">
+        <widget class="QPushButton" name="setHome">
+         <property name="minimumSize">
+          <size>
+           <width>80</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>80</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>SET HOME</string>
+         </property>
+        </widget>
+       </item>
+       <item row="10" column="0" alignment="Qt::AlignHCenter">
+        <widget class="QPushButton" name="homeMotors">
+         <property name="minimumSize">
+          <size>
+           <width>80</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>80</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="font">
+          <font>
+           <italic>false</italic>
+          </font>
+         </property>
+         <property name="text">
+          <string>HOME</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="0" alignment="Qt::AlignTop">
+        <widget class="QLabel" name="label_11">
+         <property name="font">
+          <font>
+           <pointsize>12</pointsize>
+           <weight>75</weight>
+           <bold>true</bold>
+          </font>
+         </property>
+         <property name="text">
+          <string>General</string>
+         </property>
+        </widget>
+       </item>
+       <item row="16" column="0" colspan="2" alignment="Qt::AlignHCenter">
+        <widget class="QPushButton" name="saveSettings">
+         <property name="minimumSize">
+          <size>
+           <width>180</width>
+           <height>30</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>180</width>
+           <height>30</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>SAVE SETTINGS</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="0" colspan="2">
+        <widget class="QLabel" name="label_12">
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>20</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>16777215</width>
+           <height>20</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>COM Selection</string>
+         </property>
+        </widget>
+       </item>
+       <item row="2" column="0" rowspan="2" colspan="2" alignment="Qt::AlignHCenter">
+        <widget class="QListView" name="comList">
+         <property name="minimumSize">
+          <size>
+           <width>80</width>
+           <height>50</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>200</width>
+           <height>60</height>
+          </size>
+         </property>
+        </widget>
+       </item>
+       <item row="13" column="0" colspan="2">
+        <spacer name="verticalSpacer_7">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeType">
+          <enum>QSizePolicy::Fixed</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>10</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item row="6" column="0" colspan="2">
+        <widget class="QLabel" name="label_16">
+         <property name="text">
+          <string>Positional</string>
+         </property>
+        </widget>
+       </item>
+       <item row="7" column="0" colspan="2" alignment="Qt::AlignHCenter">
+        <widget class="QPushButton" name="motorEN">
+         <property name="minimumSize">
+          <size>
+           <width>180</width>
+           <height>30</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>180</width>
+           <height>30</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>ENABLE MOTORS</string>
+         </property>
+         <property name="checkable">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="1">
+        <widget class="QPushButton" name="selectCOM">
+         <property name="maximumSize">
+          <size>
+           <width>92</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>Select COM</string>
+         </property>
+        </widget>
+       </item>
+       <item row="11" column="0" colspan="2" alignment="Qt::AlignHCenter">
+        <widget class="QPushButton" name="bothAngleSet">
+         <property name="minimumSize">
+          <size>
+           <width>180</width>
+           <height>30</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>180</width>
+           <height>30</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>TARGET BOTH</string>
+         </property>
+        </widget>
+       </item>
+       <item row="14" column="0" colspan="2">
+        <widget class="QLabel" name="label_17">
+         <property name="text">
+          <string>Global Settings</string>
+         </property>
+        </widget>
+       </item>
+       <item row="9" column="0" colspan="2" alignment="Qt::AlignHCenter">
+        <widget class="QPushButton" name="livePowTelem">
+         <property name="minimumSize">
+          <size>
+           <width>180</width>
+           <height>30</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>180</width>
+           <height>30</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>LIVE POWER RETURN</string>
          </property>
          <property name="checkable">
           <bool>true</bool>
@@ -840,54 +855,6 @@
       </widget>
      </item>
     </layout>
-   </item>
-   <item row="1" column="0" colspan="2" alignment="Qt::AlignHCenter">
-    <widget class="QLabel" name="label_13">
-     <property name="font">
-      <font>
-       <pointsize>14</pointsize>
-       <weight>75</weight>
-       <bold>true</bold>
-      </font>
-     </property>
-     <property name="text">
-      <string>MSAT Drive Board Debugger</string>
-     </property>
-    </widget>
-   </item>
-   <item row="7" column="0">
-    <widget class="QProgressBar" name="BAR_VOLT_SYS">
-     <property name="maximum">
-      <number>15</number>
-     </property>
-     <property name="value">
-      <number>14</number>
-     </property>
-    </widget>
-   </item>
-   <item row="6" column="1">
-    <widget class="QLabel" name="label_23">
-     <property name="text">
-      <string>CURR_SYS</string>
-     </property>
-    </widget>
-   </item>
-   <item row="7" column="1">
-    <widget class="QProgressBar" name="BAR_CURR_SYS">
-     <property name="maximum">
-      <number>10</number>
-     </property>
-     <property name="value">
-      <number>7</number>
-     </property>
-    </widget>
-   </item>
-   <item row="4" column="0" colspan="2">
-    <widget class="Line" name="line_6">
-     <property name="orientation">
-      <enum>Qt::Horizontal</enum>
-     </property>
-    </widget>
    </item>
   </layout>
  </widget>

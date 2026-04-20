@@ -34,6 +34,7 @@ uint32_t pos_counter = 0;
 bool checkPower = false;              // power Safety
 unsigned long pow_last_time = 0;
 bool returnPower = false;             // power Return
+uint32_t pow_counter = 0;
 
 float current_sys = 0;
 float power_sys = 0;
@@ -443,6 +444,25 @@ void recordData(char* cmd){
   }
 }
 
+// --- Record Power Data ---
+void recordPowerData(char* cmd){
+  float recordData;
+  if (sscanf(cmd, "%f", &recordData) == 1){
+    if(recordData){ 
+      returnPower = true;
+      pow_last_time = 0;
+      pow_counter = 0;
+      SerialDebug.println("time_ms,current_sys,voltage_sys,current_3V3,current_5V,current_12V");
+    }
+    else{
+      returnPower = false;
+    }
+  }
+  else{
+    SerialDebug.println("Usage: W <(0 for disable, 1 for enable)>");
+  }
+}
+
 //---------------------------------------
 //    POWER CHECK
 //---------------------------------------
@@ -638,6 +658,7 @@ void initUARTs() {
   SerialCM.setRx(PA3);
   SerialCM.setTx(PA2);
   SerialCM.begin(115200);
+  while (!SerialCM) { delay(10); } 
 
   SerialDebug.setTx(PC10);
   SerialDebug.setRx(PC11);
@@ -795,6 +816,7 @@ void setup() {
   command.add('P', tSetPID, "Top: Y<P> <I> <D>");
   command.add('X', getInfo, "Get Info: X");
   command.add('I', recordData, "Record Positional Data: I");
+  command.add('W', recordPowerData, "Record Power Data: W");
   command.add('K', lock_motors, "Enable Motors: K<0 for Disable, 1 for Enable>");
   command.add('V', setVelocity, "Set Velocity: V<motor (0 for bottom, 1 for top)> <velocity (rad/s)>");
   command.add('L', setLPF, "Set LPF: V<motor (0 for bottom, 1 for top)> <seconds>");
@@ -836,7 +858,7 @@ void loop(){
       pos_last_time += 10;
       pos_counter += 10;
 
-      SerialDebug.print(",");
+      SerialDebug.print("POS,");
       SerialDebug.print(pos_counter);                   // time
       SerialDebug.print(",");
       SerialDebug.print(motorTop.shaftAngle(), 3);  // top motor
@@ -863,6 +885,28 @@ void loop(){
   current_TP2 = currentSense(digitalRead(ADC_PITCH_RS2), 0.0100);
   current_TP3 = currentSense(digitalRead(ADC_PITCH_RS3), 0.0100);
   top_fault = digitalRead(PITCH_nFAULT);
+
+  // --- Return Power Telemetry ---
+  // Returns every 10ms (if enabled) in CSV format.
+  if(returnPower){
+    if (millis() - pow_last_time >= 10) {
+      pow_last_time += 10;
+      pow_counter += 10;
+
+      SerialDebug.print("PWR,");
+      SerialDebug.print(pow_counter);
+      SerialDebug.print(",");
+      SerialDebug.print(current_sys, 3);
+      SerialDebug.print(",");
+      SerialDebug.print(voltage_sys, 3);
+      SerialDebug.print(",");
+      SerialDebug.print(current_3V3, 3);
+      SerialDebug.print(",");
+      SerialDebug.print(current_5V, 3);
+      SerialDebug.print(",");
+      SerialDebug.println(current_12V, 3);
+    }
+  }
 
   // --- Check Power Limits ---
   // Check current and voltage values at a rate of ~75hz.

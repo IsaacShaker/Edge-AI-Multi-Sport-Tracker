@@ -58,6 +58,73 @@ class PosTelemetryWindow(QtWidgets.QMainWindow):
         self.closed.emit()
         super().closeEvent(event)
 
+class PowerTelemetryWindow(QtWidgets.QMainWindow):
+    closed = QtCore.pyqtSignal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Live Power Telemetry")
+        self.resize(900, 500)
+
+        self.plot_widget = pg.PlotWidget(title="System Current / Power")
+        self.setCentralWidget(self.plot_widget)
+
+        self.plot_widget.setLabel("left", "Value")
+        self.plot_widget.setLabel("bottom", "Time", units="s")
+        self.plot_widget.showGrid(x=True, y=True)
+        self.plot_widget.addLegend()
+
+        # Curves
+        self.current_curve = self.plot_widget.plot(name="System Current (A)", pen="r")
+        self.power_curve = self.plot_widget.plot(name="System Voltage (V)", pen="b")
+        self.curr_3V = self.plot_widget.plot(name="3.3V Current (A)", pen="g")
+        self.curr_5V = self.plot_widget.plot(name="5V Current (A)", pen="y")
+        self.curr_12V = self.plot_widget.plot(name="12V Current (A)", pen="m")
+
+        # Data buffers
+        self.time_data = []
+        self.current_data = []
+        self.power_data = []
+        self.curr_3V_data = []
+        self.curr_5V_data = []
+        self.curr_12V_data = [] 
+
+        self.start_time = time.time()
+
+        #limit number of points (prevents lag)
+        self.max_points = 500
+
+    def update_plot(self, current: float, power: float, curr_3V: float, curr_5V: float, curr_12V: float) -> None:
+        t = time.time() - self.start_time
+
+        self.time_data.append(t)
+        self.current_data.append(current)
+        self.power_data.append(power)
+        self.curr_3V_data.append(curr_3V)
+        self.curr_5V_data.append(curr_5V)
+        self.curr_12V_data.append(curr_12V)
+
+        # Keep buffer size under control
+        if len(self.time_data) > self.max_points:
+            self.time_data = self.time_data[-self.max_points:]
+            self.current_data = self.current_data[-self.max_points:]
+            self.power_data = self.power_data[-self.max_points:]
+            self.curr_3V_data = self.curr_3V_data[-self.max_points:]
+            self.curr_5V_data = self.curr_5V_data[-self.max_points:]
+            self.curr_12V_data = self.curr_12V_data[-self.max_points:]
+
+        # Update curves
+        self.current_curve.setData(self.time_data, self.current_data)
+        self.power_curve.setData(self.time_data, self.power_data)
+        self.curr_3V.setData(self.time_data, self.curr_3V_data)
+        self.curr_5V.setData(self.time_data, self.curr_5V_data)
+        self.curr_12V.setData(self.time_data, self.curr_12V_data)
+
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        self.closed.emit()
+        super().closeEvent(event)
+
 
 class DriveDebugApp(QtWidgets.QWidget):
     def __init__(self, parent=None) -> None:
@@ -79,6 +146,13 @@ class DriveDebugApp(QtWidgets.QWidget):
         self._telem_t = deque(maxlen=3000)
         self._telem_top = deque(maxlen=3000)
         self._telem_bottom = deque(maxlen=3000)
+        self._power_window: Optional[PowerTelemetryWindow] = None
+        self._power_current = 0.0
+        self._power_power = 0.0
+        self._power_current3v = 0.0
+        self._power_current5v = 0.0
+        self._power_current12v = 0.0
+        self._closing_power_window = False
         self._closing_telem_window = False
 
         # Slightly nicer defaults for spinboxes
@@ -115,6 +189,7 @@ class DriveDebugApp(QtWidgets.QWidget):
 
         # Separate-window telemetry handling
         self.ui.livePosTelem.toggled.connect(self.toggle_live_pos_telem)
+        self.ui.livePowTelem.toggled.connect(self.toggle_live_pow_telem)
 
         self.ui.saveSettings.clicked.connect(lambda: self.save_settings(settingType="all"))
         self.ui.setHome.clicked.connect(lambda: self.save_settings(settingType="home"))
@@ -244,33 +319,49 @@ class DriveDebugApp(QtWidgets.QWidget):
 
     def try_parse_telem_line(self, line: str):
         """
-        Expected payload:
-            ,33800,0.999,2.698
+        Expected tagged payloads:
+            POS,<time_ms>,<top_angle>,<bottom_angle>
+            PWR,<time_ms>,<system_current>,<system_power>,<3v_current>,<5v_current>,<12v_current>
 
         Returns:
-            (time_s, top_pos, bottom_pos) or None
+            ("POS", time_s, top, bottom)
+            ("PWR", time_s, current, power, curr_3v, curr_5v, curr_12v)
+            or None
         """
         s = line.strip()
         if not s:
             return None
 
-        if s.startswith(","):
-            s = s[1:]
-
         parts = [p.strip() for p in s.split(",")]
-        if len(parts) != 3:
+        if len(parts) not in (4, 7):
             return None
 
-        try:
-            t_raw = float(parts[0])
-            top = float(parts[1])
-            bottom = float(parts[2])
-        except ValueError:
-            return None
+        tag = parts[0]
 
-        # Assumes first field is milliseconds from device/sample timebase
-        t_s = t_raw / 1000.0
-        return t_s, top, bottom
+        if tag == "POS" and len(parts) == 4:
+            try:
+                t_raw = float(parts[1])
+                v1 = float(parts[2])
+                v2 = float(parts[3])
+            except ValueError:
+                return None
+            t_s = t_raw / 1000.0
+            return ("POS", t_s, v1, v2)
+
+        elif tag == "PWR" and len(parts) == 7:
+            try:
+                t_raw = float(parts[1])
+                v1 = float(parts[2])
+                v2 = float(parts[3])
+                v3 = float(parts[4])
+                v4 = float(parts[5])
+                v5 = float(parts[6])
+            except ValueError:
+                return None
+            t_s = t_raw / 1000.0
+            return ("PWR", t_s, v1, v2, v3, v4, v5)
+
+        return None
 
     def append_telem_sample(self, t_s: float, top: float, bottom: float) -> None:
         self._telem_t.append(t_s)
@@ -317,11 +408,23 @@ class DriveDebugApp(QtWidgets.QWidget):
 
                 telem = self.try_parse_telem_line(line)
                 if telem is not None:
-                    t_s, top, bottom = telem
-                    self.append_telem_sample(t_s, top, bottom)
+                    tag = telem[0]
+                    t_s = telem[1]
 
-                    # Optional: keep telemetry visible in the terminal too
-                    self.log(f"TELEM {t_s:.3f}s top={top:.3f} bottom={bottom:.3f}")
+                    if tag == "POS":
+                        _, _, top, bottom = telem
+                        self.append_telem_sample(t_s, top, bottom)
+                        self.log(f"POS {t_s:.3f}s top={top:.3f} bottom={bottom:.3f}")
+
+                    elif tag == "PWR":
+                        _, _, current, power, curr3v, curr5v, curr12v = telem
+                        self._power_current = current
+                        self._power_power = power
+                        self._power_current3v = curr3v
+                        self._power_current5v = curr5v
+                        self._power_current12v = curr12v
+                        self.update_power_plot()
+                        self.log(f"PWR {t_s:.3f}s current={current:.3f}A power={power:.3f}W 3V={curr3v:.3f}A 5V={curr5v:.3f}A 12V={curr12v:.3f}A")
                 else:
                     self.log(line)
 
@@ -372,6 +475,62 @@ class DriveDebugApp(QtWidgets.QWidget):
         else:
             self.get_pos_telem(False)
             self.log("Live positional telemetry disabled.")
+
+    def toggle_live_pow_telem(self, checked) -> None:
+        if checked:
+            # Reset values when starting
+            self._power_current = 0.0
+            self._power_power = 0.0
+            self._power_current3v = 0.0
+            self._power_current5v = 0.0
+            self._power_current12v = 0.0
+
+            # Open the power window
+            self.open_power_window()
+
+            # Tell STM32 to start sending power data
+            self.get_power_telem(True)
+
+            self.log("Live power telemetry enabled.")
+        else:
+            # Tell STM32 to stop sending
+            self.get_power_telem(False)
+
+            # Close the window
+            self.close_power_window()
+
+            self.log("Live power telemetry disabled.")
+    
+    def open_power_window(self) -> None:
+        if self._power_window is None:
+            self._power_window = PowerTelemetryWindow(self)
+            self._power_window.closed.connect(self.on_power_window_closed)
+
+        self._power_window.show()
+        self._power_window.raise_()
+        self._power_window.activateWindow()
+        self.update_power_plot()
+
+    def close_power_window(self) -> None:
+        if self._power_window is not None:
+            self._closing_power_window = True
+            self._power_window.close()
+            self._power_window = None
+            self._closing_power_window = False
+
+    def on_power_window_closed(self) -> None:
+        self._power_window = None
+
+    def update_power_plot(self) -> None:
+        if self._power_window is None:
+            return
+        self._power_window.update_plot(self._power_current, self._power_power, self._power_current3v, self._power_current5v, self._power_current12v)
+
+    def get_power_telem(self, checked) -> None:
+        if checked:
+            self.write_line("W1")
+        else:
+            self.write_line("W0")
 
     #
     # Command actions (matches 2D_gimbal_Control.ino)
@@ -454,63 +613,33 @@ class DriveDebugApp(QtWidgets.QWidget):
 
     # Fun programs for demonstration purposes.
     def full_scan_mode(self):
-        sweep_time = 5
-        dt = 0.01   # 100 Hz
+        yaw_mid = 3.5
+        yaw_amp = 1.5
+        pitch_mid = 2.15
+        pitch_amp = 0.65
+        steps = 100
+        dt = 0.05  # 20 Hz
 
-        # Limits
-        pitch_min = 1.5
-        pitch_max = 2.8
-        yaw_min = 1.5
-        yaw_max = 3.3
-
-        # Midpoints + amplitudes
-        pitch_mid = (pitch_min + pitch_max) / 2
-        pitch_amp = (pitch_max - pitch_min) / 2
-
-        yaw_mid = (yaw_min + yaw_max) / 2
-        yaw_amp = (yaw_max - yaw_min) / 2
-
-        start_time = time.time()
-
-        # Run exactly one sinusoidal cycle
-        while (time.time() - start_time) < sweep_time:
-            elapsed = time.time() - start_time
-            theta = 2 * math.pi * (elapsed / sweep_time)
-
-            # Smooth sinusoidal motion
-            yaw = yaw_mid + yaw_amp * math.sin(theta)
-            pitch = pitch_mid + pitch_amp * math.sin(theta)
-
-            self.write_line(f"B{yaw:.4f} 0")
-            self.write_line(f"T{pitch:.4f} 0")
-
+        for i in range(steps + 1):
+            t = i / steps
+            yaw = yaw_mid + yaw_amp * math.sin(t * 2 * math.pi)
+            pitch = pitch_mid + pitch_amp * math.sin(t * 2 * math.pi)
+            self.write_line(f"B{yaw:.3f} 0")
+            self.write_line(f"T{pitch:.3f} 0")
             time.sleep(dt)
 
-        # Optional: finish centered
-        self.write_line(f"B{yaw_mid:.4f} 0")
-        self.write_line(f"T{pitch_mid:.4f} 0")
 
     def yaw_scan_mode(self):
-        sweep_time = 5.0          # full cycle duration (seconds)
-        dt = 0.01                 # 100 Hz update
+        yaw_mid = 3.5
+        yaw_amp = 1.5
+        steps = 100
+        dt = 0.05  # 20 Hz
 
-        yaw_min = 1.5
-        yaw_max = 3.3
-        yaw_mid = (yaw_min + yaw_max) / 2
-        yaw_amp = (yaw_max - yaw_min) / 2
-
-        start_time = time.time()
-
-        while (time.time() - start_time) < sweep_time:
-            elapsed = time.time() - start_time
-            theta = 2 * math.pi * (elapsed / sweep_time)
-
-            # Smooth sinusoidal position
-            yaw = yaw_mid + yaw_amp * math.sin(theta)
-
-            self.write_line(f"B{yaw:.4f} 0")
+        for i in range(steps + 1):
+            t = i / steps
+            yaw = yaw_mid + yaw_amp * math.sin(t * 2 * math.pi)
+            self.write_line(f"B{yaw:.3f} 0")
             time.sleep(dt)
-
     #
     # Cleanup
     #

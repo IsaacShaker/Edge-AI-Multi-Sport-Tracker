@@ -2,6 +2,9 @@
 #define HSE_VALUE 25000000U
 
 #include <SimpleFOC.h>
+#if defined(ARDUINO_ARCH_STM32)
+#include <drivers/hardware_specific/stm32/stm32_mcu.h>
+#endif
 #include <EEPROM.h>
 #include <Wire.h>
 #include "definitions.h"
@@ -17,10 +20,10 @@
 float target_angle_bottom = 0;        // pan/yaw target (radians)
 float target_angle_top = 0;           // tilt/pitch target (radians)
 
-float target_angle_bottom_min = 5.0;  // pan/yaw target angle minimum
-float target_angle_bottom_max = 7.0;  // pan/yaw target angle maximum
-float target_angle_top_min = -3.0;    // tilt/pitch target angle minimum
-float target_angle_top_max = -1.0;    // tilt/pitch target angle maximum
+float target_angle_bottom_min = 4.5;  // pan/yaw target angle minimum
+float target_angle_bottom_max = 6.5;  // pan/yaw target angle maximum
+float target_angle_top_min = -1.0;    // tilt/pitch target angle minimum
+float target_angle_top_max = 1.0;    // tilt/pitch target angle maximum
 
 float home_angle_bottom = 0;          // pan/yaw target (radians) defualt
 float home_angle_top = 0;             // tilt/pitch target (radians) default
@@ -107,10 +110,10 @@ extern "C" void SystemClock_Config(void){
 //    SERIAL DEBUG
 //---------------------------------------
 
-#define Serial SerialDebug
-HardwareSerial SerialCM(USART2);      // STM and CM UART
-HardwareSerial SerialDebug(USART3);   // debug UART
 
+// HardwareSerial SerialCM(USART2);      // STM and CM UART
+HardwareSerial SerialDebug(USART3);   // debug UART
+#define SerialCM Serial
 
 //---------------------------------------
 //    SENSOR CONFIGURATION
@@ -130,7 +133,7 @@ BLDCDriver3PWM driverBottom = BLDCDriver3PWM(YAW_IN1, YAW_IN2, YAW_IN3, YAW_EN);
 
 // --- Top Motor (Tilt/Pitch) ---
 BLDCMotor motorTop = BLDCMotor(POLE_PAIRS, PHASE_RESISTANCE, KV_RATING, Q_INDUCTANCE);
-BLDCDriver3PWM driverTop = BLDCDriver3PWM(PITCH_IN3, PITCH_IN2 , PITCH_IN1, PITCH_EN);  // PWM pins + enable
+BLDCDriver3PWM driverTop = BLDCDriver3PWM(PITCH_IN1, PITCH_IN2 , PITCH_IN3, PITCH_EN);  // PWM pins + enable
 
 
 //---------------------------------------
@@ -144,7 +147,7 @@ Settings settings;  // instantiate the gimbal settings.
 //    COMMANDER (Serial Interface)
 //---------------------------------------
 
-Commander command = Commander(SerialDebug);
+Commander command = Commander(SerialCM);
 
 
 //---------------------------------------
@@ -170,10 +173,10 @@ void doTargetBottom(char* cmd){
   // else, send non-relative location offset.
   if(sscanf(cmd, "%f %f", &target, &relative) == 2){
     if(relative == 1){
-      target_angle_bottom = checkBounds(0, (fmod(motorBottom.shaftAngle() + target, 6.28f)));
+      target_angle_bottom = checkBounds(0, (motorBottom.shaftAngle() + target));
     }
     else{
-      target_angle_bottom = checkBounds(0, (fmod(target, 6.28f)));
+      target_angle_bottom = checkBounds(0, (target));
     }
   }
   else{
@@ -188,10 +191,10 @@ void doTargetTop(char* cmd){
   // else, send non-relative location offset.
   if(sscanf(cmd, "%f %f", &target, &relative) == 2){
     if(relative == 1){
-      target_angle_top = checkBounds(1, (fmod(motorTop.shaftAngle() + target, 6.28f)));
+      target_angle_top = checkBounds(1, (motorTop.shaftAngle() + target));
     }
     else{
-      target_angle_top = checkBounds(1, (fmod(target, 6.28f)));
+      target_angle_top = checkBounds(1, (target));
     }
   }
   else{
@@ -427,7 +430,7 @@ void saveSettings(char* cmd){
   }
 }
 
-// --- Positional Telemetry ---
+// --- Telemetry ---
 void recordData(char* cmd){
   float recordData;
   if (sscanf(cmd, "%f", &recordData) == 1){
@@ -443,6 +446,24 @@ void recordData(char* cmd){
   }
   else{
     SerialDebug.println("Usage: I <(0 for disable, 1 for enable)>");
+  }
+}
+
+void recordPower(char* cmd){
+  float enablePowerTelem;
+  if (sscanf(cmd, "%f", &enablePowerTelem) == 1){
+    if(enablePowerTelem){
+      returnPower = true;
+      pow_last_time = 0;
+      pow_counter = 0;
+      SerialDebug.println("PWR,time_ms,system_current,system_power");
+    }
+    else{
+      returnPower = false;
+    }
+  }
+  else{
+    SerialDebug.println("Usage: W <(0 for disable, 1 for enable)>");
   }
 }
 
@@ -541,6 +562,7 @@ void configureDigitalInputs() {
 
 // --- Analog Inputs ---
 void configureAnalogInputs() {
+  analogReadResolution(12);
   // Optional in STM32duino, but OK for readability.
   pinMode(ADC_eFUSE_V, INPUT_ANALOG);
   pinMode(ADC_eFUSE_I, INPUT_ANALOG);
@@ -658,12 +680,10 @@ void enablePowerRails() {
 
 // --- Initialize CM and Debug UART ---
 void initUARTs() {
-  SerialCM.setRx(PA3);
-  SerialCM.setTx(PA2);
+  delay(1000);
   SerialCM.begin(115200);
-  delay(250);
-  SerialDebug.setTx(PC10);
-  SerialDebug.setRx(PC11);
+  SerialDebug.setTx(DEBUG_TX);
+  SerialDebug.setRx(DEBUG_RX);
   SerialDebug.begin(115200);
   delay(250);
 
@@ -697,6 +717,67 @@ static void printClockInfo() {
   SerialDebug.println(HAL_RCC_GetPCLK2Freq());
 
   SerialDebug.println("----------------------");
+}
+
+void printSystemData() {
+  SerialCM.println("\n===== SYSTEM STATUS =====");
+
+  // System power
+  SerialCM.println("System Voltage: " + String(voltage_sys, 3) + " V");
+  SerialCM.println("System Current: " + String(current_sys, 3) + " A");
+  SerialCM.println("System Power  : " + String(power_sys, 3) + " W");
+
+  // Power rails
+  SerialCM.println("\n--- Power Rails ---");
+  SerialCM.println("3.3V Current : " + String(current_3V3*1000.0, 6) + " mA");
+  SerialCM.println("5V Current   : " + String(current_5V*1000.0, 6) + " mA");
+  SerialCM.println("12V Current  : " + String(current_12V*1000.0, 6) + " mA");
+
+  // Bottom (Yaw)
+  SerialCM.println("\n--- Bottom (Yaw) ---");
+  SerialCM.println("BP1: " + String(current_BP1, 4) +
+                      " | BP2: " + String(current_BP2, 4) +
+                      " | BP3: " + String(current_BP3, 4));
+  SerialCM.println("Bottom Fault: " + String(bottom_fault));
+
+  // Top (Pitch)
+  SerialCM.println("\n--- Top (Pitch) ---");
+  SerialCM.println("TP1: " + String(current_TP1, 4) +
+                      " | TP2: " + String(current_TP2, 4) +
+                      " | TP3: " + String(current_TP3, 4));
+  SerialCM.println("Top Fault   : " + String(top_fault));
+
+  SerialCM.println("==========================\n");
+}
+
+void printRawADC() {
+  SerialCM.println("\n===== RAW ADC VALUES =====");
+
+  // System measurements
+  SerialCM.println("ADC_eFUSE_I : " + String(analogRead(ADC_eFUSE_I)));
+  SerialCM.println("ADC_eFUSE_V : " + String(analogRead(ADC_eFUSE_V)));
+
+  // Power rails
+  SerialCM.println("\n--- Power Rails ---");
+  SerialCM.println("ADC_3_3V : " + String(analogRead(ADC_3_3V)));
+  SerialCM.println("ADC_5V   : " + String(analogRead(ADC_5V)));
+  SerialCM.println("ADC_12V  : " + String(analogRead(ADC_12V)));
+
+  // Bottom (Yaw)
+  SerialCM.println("\n--- Bottom (Yaw) ---");
+  SerialCM.println("YAW_RS1 : " + String(analogRead(ADC_YAW_RS1)));
+  SerialCM.println("YAW_RS2 : " + String(analogRead(ADC_YAW_RS2)));
+  SerialCM.println("YAW_RS3 : " + String(analogRead(ADC_YAW_RS3)));
+  SerialCM.println("YAW_nFAULT : " + String(digitalRead(YAW_nFAULT)));
+
+  // Top (Pitch)
+  SerialCM.println("\n--- Top (Pitch) ---");
+  SerialCM.println("PITCH_RS1 : " + String(analogRead(ADC_PITCH_RS1)));
+  SerialCM.println("PITCH_RS2 : " + String(analogRead(ADC_PITCH_RS2)));
+  SerialCM.println("PITCH_RS3 : " + String(analogRead(ADC_PITCH_RS3)));
+  SerialCM.println("PITCH_nFAULT : " + String(digitalRead(PITCH_nFAULT)));
+
+  SerialCM.println("============================\n");
 }
 
 void i2cScan(TwoWire &wire, const char* busName) {
@@ -775,63 +856,32 @@ void setup() {
     SerialDebug.println("No valid settings... Loading defaults.");
 
     // Default PID values
-    settings.bottom_p = 0.01;
-    settings.bottom_i = 0.0;
-    settings.bottom_d = 0.0;
+    settings.bottom_p = 0.500;
+    settings.bottom_i = 1.500;
+    settings.bottom_d = 0.020;
 
-    settings.top_p = 0.01;
-    settings.top_i = 0.0;
-    settings.top_d = 0.0;
+    settings.top_p = 0.250;
+    settings.top_i = 0.800;
+    settings.top_d = 0.010;
 
-    settings.bottom_home = 0.0;
+    settings.bottom_home = 5.50;
     settings.top_home = 0.0;
 
-    settings.top_vlimit = 7.0;
-    settings.bottom_vlimit = 7.0;
+    settings.top_vlimit = 20.0;
+    settings.bottom_vlimit = 20.0;
 
-    settings.top_lpf = 0.01;
-    settings.bottom_lpf = 0.01;
+    settings.top_lpf = 0.80;
+    settings.bottom_lpf = 1.60;
 
     settings_save(settings);
   }
 
-
-  // --- Top Motor (Pitch) Setup ---
-  SerialDebug.println(F("--- Top Motor (Tilt) ---"));
-  motorTop.linkSensor(&sensorTop);
-
-  driverTop.voltage_power_supply = 12;
-  driverTop.init();
-  __HAL_RCC_TIM8_CLK_ENABLE();
-  TIM8->BDTR |= TIM_BDTR_MOE;
-  motorTop.linkDriver(&driverTop);
-
-  motorTop.foc_modulation = FOCModulationType::SpaceVectorPWM;
-  motorTop.controller = MotionControlType::angle;
-
-  // Velocity PID - may need different tuning for tilt axis
-  motorTop.PID_velocity.P = settings.top_p;
-  motorTop.PID_velocity.I = settings.top_i;
-  motorTop.PID_velocity.D = settings.top_d;
-  motorTop.PID_velocity.output_ramp = 100;
-
-  motorTop.voltage_limit = 4.0;
-  motorTop.LPF_velocity.Tf = settings.top_lpf;
-
-  // Angle P controller
-  motorTop.P_angle.P = 10;
-  motorTop.velocity_limit = settings.top_vlimit;
-
-  motorTop.useMonitoring(Serial);
-  motorTop.init();
-  motorTop.initFOC();
-
-
-  // --- Bottom Motor (Yaw) Setup ---
+    // --- Bottom Motor (Yaw) Setup ---
   delay(500);
   SerialDebug.println(F("--- Bottom Motor (Pan) ---"));
   motorBottom.linkSensor(&sensorBottom);
   driverBottom.voltage_power_supply = 12;
+  driverBottom.pwm_frequency = 32000;
   driverBottom.init();
   motorBottom.linkDriver(&driverBottom);
 
@@ -851,9 +901,49 @@ void setup() {
   motorBottom.P_angle.P = 10;
   motorBottom.velocity_limit = settings.bottom_vlimit;
 
-  motorBottom.useMonitoring(Serial);
+  motorBottom.useMonitoring(SerialDebug);
   motorBottom.init();
+  delay(1500);
   motorBottom.initFOC();
+
+  // --- Top Motor (Pitch) Setup ---
+  SerialDebug.println(F("--- Top Motor (Tilt) ---"));
+#if defined(ARDUINO_ARCH_STM32)
+  // Force TIM3 to stay reserved for the bottom motor.
+  // The top motor pins can also map to TIM3, so reserve it here to ensure the bottom motor keeps the only valid TIM3 mapping.
+  stm32_reserveTimer(TIM3);
+#endif
+  motorTop.linkSensor(&sensorTop);
+
+  driverTop.voltage_power_supply = 12;
+  driverTop.pwm_frequency = 32000;
+  driverTop.init();
+  motorTop.linkDriver(&driverTop);
+
+  motorTop.foc_modulation = FOCModulationType::SpaceVectorPWM;
+  motorTop.controller = MotionControlType::angle;
+
+  // Velocity PID - may need different tuning for tilt axis
+  motorTop.PID_velocity.P = settings.top_p;
+  motorTop.PID_velocity.I = settings.top_i;
+  motorTop.PID_velocity.D = settings.top_d;
+  motorTop.PID_velocity.output_ramp = 100;
+
+  motorTop.voltage_limit = 4.0;
+  motorTop.LPF_velocity.Tf = settings.top_lpf;
+
+  // Angle P controller
+  motorTop.P_angle.P = 10;
+  motorTop.velocity_limit = settings.top_vlimit;
+
+  motorTop.useMonitoring(SerialDebug);
+  motorTop.init();
+  delay(1500);
+  motorTop.initFOC();
+  
+
+
+
 
   // --- Motor Initial State Setup ---
   target_angle_bottom = motorBottom.shaftAngle();
@@ -874,6 +964,7 @@ void setup() {
   command.add('V', setVelocity, "Set Velocity: V<motor (0 for bottom, 1 for top)> <velocity (rad/s)>");
   command.add('L', setLPF, "Set LPF: V<motor (0 for bottom, 1 for top)> <seconds>");
   command.add('S', saveSettings, "Save Settings: S <PID(0|1)> <Velocity(0|1)> <Home(0|1)>");
+  command.add('W', recordPower, "Record Power Data: W");
 
   SerialDebug.println(F("=== 2D Gimbal Ready ==="));
   motorTop.disable();
@@ -892,12 +983,12 @@ void loop(){
   // SerialDebug.println("Hello! This is working.");
   // delay(500);
 
-  // // --- Toggle Microcontroller Status Pin ---
-  // if(millis() - stm_last_time >= 500){
-  //   stm_last_time += 500;
-  //   stm_counter += 500;
-  //   digitalWrite(STM_STAT, !digitalRead(STM_STAT));
-  // }
+  // --- Toggle Microcontroller Status Pin ---
+  if(millis() - stm_last_time >= 500){
+    stm_last_time += 500;
+    stm_counter += 500;
+    digitalWrite(STM_STAT, !digitalRead(STM_STAT));
+  }
 
   // --- Run FOC for Both Motors ---
   motorBottom.loopFOC();
@@ -914,43 +1005,69 @@ void loop(){
       pos_last_time += POS_INTERVAL;
       pos_counter += POS_INTERVAL;
 
+      SerialDebug.print("POS,");
+      SerialDebug.print(pos_counter);
       SerialDebug.print(",");
-      SerialDebug.print(pos_counter);                   // time
+      SerialDebug.print(motorTop.shaftAngle(), 3);
       SerialDebug.print(",");
-      SerialDebug.print(motorTop.shaftAngle(), 3);  // top motor
-      SerialDebug.print(",");
-      SerialDebug.println(motorBottom.shaftAngle(), 3); // bottom motor
+      SerialDebug.println(motorBottom.shaftAngle(), 3);
+            
+      //Prints power rails to CM at same interval for logging.
     }
   }
 
-  // // --- Acquire and Process Analog Inputs ---
-  // current_sys = systemCurrent(digitalRead(ADC_eFUSE_I));
-  // voltage_sys = systemVoltage(digitalRead(ADC_eFUSE_V));
-  // power_sys = current_sys * voltage_sys;
 
-  // current_3V3 = currentSense(digitalRead(ADC_3_3V), 0.0015);
-  // current_5V = currentSense(digitalRead(ADC_5V), 0.0015);
-  // current_12V = currentSense(digitalRead(ADC_12V), 0.0015);
+  // --- Acquire and Process Analog Inputs ---
+  current_sys = systemCurrent(float(analogRead(ADC_eFUSE_I)) / ADC_RES);
+  voltage_sys = systemVoltage(float(analogRead(ADC_eFUSE_V)) / ADC_RES);
+  power_sys = current_sys * voltage_sys;
 
-  // current_BP1 = currentSense(digitalRead(ADC_YAW_RS1), 0.0100);
-  // current_BP2 = currentSense(digitalRead(ADC_YAW_RS2), 0.0100);
-  // current_BP3 = currentSense(digitalRead(ADC_YAW_RS3), 0.0100);
-  // bottom_fault = digitalRead(YAW_nFAULT);
+  current_3V3 = currentSense(float(analogRead(ADC_3_3V)) / ADC_RES, 0.0015);
+  current_5V = currentSense(float(analogRead(ADC_5V)) / ADC_RES, 0.0015);
+  current_12V = currentSense(float(analogRead(ADC_12V)) / ADC_RES, 0.0015);
 
-  // current_TP1 = currentSense(digitalRead(ADC_PITCH_RS1), 0.0100);
-  // current_TP2 = currentSense(digitalRead(ADC_PITCH_RS2), 0.0100);
-  // current_TP3 = currentSense(digitalRead(ADC_PITCH_RS3), 0.0100);
-  // top_fault = digitalRead(PITCH_nFAULT);
+  current_BP1 = currentSense(float(analogRead(ADC_YAW_RS1)) / ADC_RES, 0.0100);
+  current_BP2 = currentSense(float(analogRead(ADC_YAW_RS2)) / ADC_RES, 0.0100);
+  current_BP3 = currentSense(float(analogRead(ADC_YAW_RS3)) / ADC_RES, 0.0100);
+  bottom_fault = digitalRead(YAW_nFAULT);
 
-  // // --- Check Power Limits ---
-  // // Check current and voltage values at a rate of ~75hz.
-  // if(checkPower){
-  //   if (millis() - pow_last_time >= 13) {
-  //     pow_last_time += 13;
-  //     pow_counter += 13;
-  //     powerCheck();
-  //   }
-  // }
+  current_TP1 = currentSense(float(analogRead(ADC_PITCH_RS1)) / ADC_RES, 0.0100);
+  current_TP2 = currentSense(float(analogRead(ADC_PITCH_RS2)) / ADC_RES, 0.0100);
+  current_TP3 = currentSense(float(analogRead(ADC_PITCH_RS3)) / ADC_RES, 0.0100);
+  top_fault = digitalRead(PITCH_nFAULT);
+
+
+  // --- Check Power Limits ---
+  // Check current and voltage values at a rate of ~75hz.
+  checkPower = true;
+  if(checkPower){
+    if (millis() - pow_last_time >= 500) {
+      pow_last_time += 500;
+      pow_counter += 500;
+      printSystemData();
+    }
+  }
+
+  if(returnPower){
+    if (millis() - pow_last_time >= POS_INTERVAL) {
+      pow_last_time += POS_INTERVAL;
+      pow_counter += POS_INTERVAL;
+
+      SerialDebug.print("PWR,");
+      SerialDebug.print(pow_counter);
+      SerialDebug.print(",");
+      SerialDebug.print(current_sys, 3);
+      SerialDebug.print(",");
+      SerialDebug.print(voltage_sys, 3);
+      SerialDebug.print(",");
+      SerialDebug.print(current_3V3*1000, 3);
+      SerialDebug.print(",");
+      SerialDebug.print(current_5V*1000, 3);
+      SerialDebug.print(",");
+      SerialDebug.println(current_12V*1000, 3);
+      
+    }
+  } 
 
   // --- Serial Command Processing ---
   command.run();
