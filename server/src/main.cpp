@@ -107,6 +107,12 @@ int main(int argc, char** argv) {
         else if (arg == "--raw-detection") {
             config.use_raw_detection = true;
         }
+        else if (arg == "--hfov" && i + 1 < argc) {
+            config.vision.hfov_deg = std::stof(argv[++i]);
+        }
+        else if (arg == "--vfov" && i + 1 < argc) {
+            config.vision.vfov_deg = std::stof(argv[++i]);
+        }
         else if (arg == "--port" && i + 1 < argc) {
             config.web_port = std::stoi(argv[++i]);
         }

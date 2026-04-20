@@ -70,6 +70,8 @@ while [[ $# -gt 0 ]]; do
         --port)       WEB_PORT="$2"; shift 2 ;;
         --color-assist) COLOR_ASSIST=true; shift ;;
         --raw-detection) RAW_DETECTION=true; shift ;;
+        --hfov)       HFOV_DEG="$2"; shift 2 ;;
+        --vfov)       VFOV_DEG="$2"; shift 2 ;;
         --help)
             grep '^#' "$0" | grep -v '!/bin' | sed 's/^# \{0,1\}//'
             exit 0
@@ -226,6 +228,15 @@ if [ "${RAW_DETECTION:-false}" = true ]; then
     RAW_DETECTION_FLAG="--raw-detection"
 fi
 
+# ── FOV flags ───────────────────────────────────────────────────────────
+FOV_FLAGS=""
+if [ -n "${HFOV_DEG:-}" ]; then
+    FOV_FLAGS="$FOV_FLAGS --hfov $HFOV_DEG"
+fi
+if [ -n "${VFOV_DEG:-}" ]; then
+    FOV_FLAGS="$FOV_FLAGS --vfov $VFOV_DEG"
+fi
+
 # shellcheck disable=SC2086
 if [ -n "$MODEL_PATH" ]; then
     ./bin/tracker_server \
@@ -238,7 +249,8 @@ if [ -n "$MODEL_PATH" ]; then
         $VIZ_FLAG \
         $STREAM_FLAGS \
         $COLOR_ASSIST_FLAG \
-        $RAW_DETECTION_FLAG
+        $RAW_DETECTION_FLAG \
+        $FOV_FLAGS
 else
     ./bin/tracker_server \
         --vision      "$VISION" \
@@ -249,5 +261,6 @@ else
         $VIZ_FLAG \
         $STREAM_FLAGS \
         $COLOR_ASSIST_FLAG \
-        $RAW_DETECTION_FLAG
+        $RAW_DETECTION_FLAG \
+        $FOV_FLAGS
 fi
