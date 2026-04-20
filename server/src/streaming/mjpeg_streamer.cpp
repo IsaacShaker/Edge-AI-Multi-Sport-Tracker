@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <glob.h>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -201,9 +202,13 @@ void StreamServer::handleClient(int fd) {
         if (sp2 != std::string::npos)
             path = req.substr(sp1 + 1, sp2 - sp1 - 1);
     }
-    // Strip query string
+    // Strip query string — but save it first for endpoints that need params
+    std::string query;
     auto q = path.find('?');
-    if (q != std::string::npos) path = path.substr(0, q);
+    if (q != std::string::npos) {
+        query = path.substr(q + 1);
+        path  = path.substr(0, q);
+    }
 
     if (path == "/" || path == "/index.html") {
         serveStatic(fd);
@@ -213,6 +218,35 @@ void StreamServer::handleClient(int fd) {
         serveSSE(fd);
     } else if (path == "/config") {
         serveConfig(fd);
+    } else if (path == "/metrics") {
+        serveMetrics(fd);
+    } else if (path == "/prediction-csv") {
+        serveCSV(fd);
+    } else if (path == "/motor-log") {
+        serveMotorLog(fd);
+    } else if (path == "/tracking/enable" && method == "POST") {
+        serveTracking(fd, true);
+    } else if (path == "/tracking/disable" && method == "POST") {
+        serveTracking(fd, false);
+    } else if (path == "/gimbal/target" && method == "POST") {
+        // Parse nx=<float>&ny=<float> from the query string
+        float nx = 0.5f, ny = 0.5f;
+        auto parse_param = [&](const std::string& key) -> float {
+            auto pos = query.find(key + "=");
+            if (pos == std::string::npos) return 0.5f;
+            pos += key.size() + 1;
+            auto end = query.find('&', pos);
+            std::string val = (end == std::string::npos)
+                ? query.substr(pos)
+                : query.substr(pos, end - pos);
+            try { return std::stof(val); } catch (...) { return 0.5f; }
+        };
+        nx = parse_param("nx");
+        ny = parse_param("ny");
+        // Clamp to valid range
+        nx = std::max(0.0f, std::min(1.0f, nx));
+        ny = std::max(0.0f, std::min(1.0f, ny));
+        serveGimbalTarget(fd, nx, ny);
     } else if (path == "/record/start" && method == "POST") {
         serveRecordStart(fd);
     } else if (path == "/record/stop" && method == "POST") {
@@ -330,6 +364,107 @@ void StreamServer::serveConfig(int fd) {
     hdr << "HTTP/1.1 200 OK\r\n"
         << "Content-Type: application/json\r\n"
         << "Content-Length: " << body.size() << "\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n"
+        << "\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, body.data(), body.size());
+}
+
+void StreamServer::setMetrics(const std::string& text) {
+    std::lock_guard<std::mutex> lk(metrics_mutex_);
+    metrics_text_ = text;
+}
+
+void StreamServer::serveMetrics(int fd) {
+    std::string body;
+    {
+        std::lock_guard<std::mutex> lk(metrics_mutex_);
+        body = metrics_text_.empty() ? "No metrics yet.\n" : metrics_text_;
+    }
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: text/plain; charset=utf-8\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Content-Disposition: attachment; filename=\"metrics.txt\"\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n"
+        << "\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, body.data(), body.size());
+}
+
+void StreamServer::serveTracking(int fd, bool enable) {
+    if (tracking_cb_) tracking_cb_(enable);
+    const char* state = enable ? "enabled" : "disabled";
+    std::string b = std::string("{\"tracking\":\"") + state + "\"}";
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: application/json\r\n"
+        << "Content-Length: " << b.size() << "\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n"
+        << "\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, b.data(), b.size());
+}
+
+void StreamServer::serveGimbalTarget(int fd, float nx, float ny) {
+    if (gimbal_target_cb_) gimbal_target_cb_(nx, ny);
+    std::string b = "{\"ok\":true}";
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: application/json\r\n"
+        << "Content-Length: " << b.size() << "\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n"
+        << "\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, b.data(), b.size());
+}
+
+void StreamServer::serveCSV(int fd) {
+    std::ifstream f("prediction_log.csv", std::ios::binary);
+    std::string body;
+    if (f) {
+        body.assign(std::istreambuf_iterator<char>(f),
+                    std::istreambuf_iterator<char>());
+    }
+    if (body.empty()) {
+        body = "frame,predicted_x,predicted_y,actual_x,actual_y,velocity,error,timestamp_ms\n";
+    }
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: text/csv; charset=utf-8\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Content-Disposition: attachment; filename=\"prediction_log.csv\"\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n"
+        << "\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, body.data(), body.size());
+}
+
+void StreamServer::serveMotorLog(int fd) {
+    std::ifstream f("motor_log.csv", std::ios::binary);
+    std::string body;
+    if (f) {
+        body.assign(std::istreambuf_iterator<char>(f),
+                    std::istreambuf_iterator<char>());
+    }
+    if (body.empty()) {
+        body = "timestamp_ms,pan_rad,tilt_rad,pan_deg,tilt_deg,err_x_px,err_y_px\n";
+    }
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: text/csv; charset=utf-8\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Content-Disposition: attachment; filename=\"motor_log.csv\"\r\n"
         << "Access-Control-Allow-Origin: *\r\n"
         << "Connection: close\r\n"
         << "\r\n";

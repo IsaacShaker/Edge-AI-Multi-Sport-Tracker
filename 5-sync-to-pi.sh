@@ -14,7 +14,7 @@
 set -e
 
 # ── Configuration ────────────────────────────────────────────────────────────
-PI_HOST="${PI_HOST:-yfarag@10.5.41.46}"  # e.g. pi@192.168.1.42  or  pi@raspberrypi.local
+PI_HOST="${PI_HOST:-compute@10.5.60.97}"  # e.g. pi@192.168.1.42  or  pi@raspberrypi.local
 PI_DEST="${PI_DEST:-~/Edge-AI-Multi-Sport-Tracker}"  # destination path on the pi
 # ─────────────────────────────────────────────────────────────────────────────
 

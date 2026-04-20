@@ -50,6 +50,18 @@ public:
     // Served verbatim at GET /config so the dashboard can display settings.
     void setConfig(const std::string& json);
 
+    // Called to update the live metrics text (plain text).
+    // Served at GET /metrics as a downloadable file.
+    void setMetrics(const std::string& text);
+
+    // Register a callback invoked when the web UI toggles active tracking.
+    // The TrackerServer passes a lambda that calls setTrackingActive().
+    void setTrackingCallback(std::function<void(bool)> cb) { tracking_cb_ = std::move(cb); }
+
+    // Register a callback invoked when the web UI sends a manual gimbal target.
+    // nx, ny are normalised image coordinates in [0, 1].
+    void setGimbalTargetCallback(std::function<void(float, float)> cb) { gimbal_target_cb_ = std::move(cb); }
+
 private:
     std::atomic<bool> running_{false};
     int  port_{8080};
@@ -71,6 +83,16 @@ private:
     // Config JSON — set once at startup, served at /config
     std::string config_json_;
 
+    // Metrics text — updated periodically, served at GET /metrics
+    std::mutex  metrics_mutex_;
+    std::string metrics_text_;
+
+    // Callback invoked when the dashboard toggles tracking on/off
+    std::function<void(bool)> tracking_cb_;
+
+    // Callback invoked when the web UI sends a manual gimbal target (nx, ny in [0,1])
+    std::function<void(float, float)> gimbal_target_cb_;
+
     // Recording state — video is written to disk in kClipDurationSecs-second
     // chunks so RAM usage stays flat even for hour-long recordings.
     static constexpr int kClipDurationSecs = 60;
@@ -88,6 +110,11 @@ private:
     void serveMjpeg(int fd);
     void serveSSE(int fd);
     void serveConfig(int fd);
+    void serveMetrics(int fd);
+    void serveCSV(int fd);
+    void serveMotorLog(int fd);
+    void serveTracking(int fd, bool enable);
+    void serveGimbalTarget(int fd, float nx, float ny);
     void serveRecordStart(int fd);
     void serveRecordStop(int fd);
     void serveRecordDownload(int fd);

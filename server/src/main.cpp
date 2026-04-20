@@ -33,6 +33,7 @@ void printUsage() {
     std::cout << "  --no-roi              Disable ROI optimization (always use full frame)" << std::endl;
     std::cout << "  --web-stream          Enable web streaming dashboard (default: disabled)" << std::endl;
     std::cout << "  --port <port>         Web streaming port (default: 8080)" << std::endl;
+    std::cout << "  --color-assist        Enable inline color detector as fallback when primary misses" << std::endl;
     std::cout << "  --help                Show this help message" << std::endl;
 }
 
@@ -100,6 +101,12 @@ int main(int argc, char** argv) {
         else if (arg == "--web-stream") {
             config.enable_web_streaming = true;
         }
+        else if (arg == "--color-assist") {
+            config.color_assist = true;
+        }
+        else if (arg == "--raw-detection") {
+            config.use_raw_detection = true;
+        }
         else if (arg == "--port" && i + 1 < argc) {
             config.web_port = std::stoi(argv[++i]);
         }
@@ -118,6 +125,8 @@ int main(int argc, char** argv) {
     std::cout << "Motor:     " << config.motor.controller_type << std::endl;
     std::cout << "Camera:    " << config.camera_source << std::endl;
     std::cout << "ROI:       " << (enable_roi ? "Enabled" : "Disabled") << std::endl;
+    std::cout << "ColorAssist: " << (config.color_assist ? "Enabled" : "Disabled") << std::endl;
+    std::cout << "RawDetection:" << (config.use_raw_detection ? "Enabled (bypass Kalman)" : "Disabled") << std::endl;
     if (config.enable_web_streaming) {
         std::cout << "Streaming: http://0.0.0.0:" << config.web_port << std::endl;
     }

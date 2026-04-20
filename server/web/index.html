@@ -91,6 +91,24 @@
         border-radius: 10px;
       }
 
+      /* Click-to-target overlay — sits on top of the stream image */
+      #stream-wrap {
+        position: relative;
+        width: 100%;
+        line-height: 0;
+      }
+      #target-overlay {
+        position: absolute;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        cursor: crosshair;
+        border-radius: 10px;
+        pointer-events: none; /* enabled via JS when tracking is off */
+      }
+      #target-overlay.active {
+        pointer-events: auto;
+      }
+
       #placeholder {
         text-align: center;
         color: #444;
@@ -270,6 +288,24 @@
       .dl-btn:hover {
         background: #143d28;
       }
+      .metrics-btn {
+        display: block;
+        text-align: center;
+        padding: 9px 0;
+        background: #1a1f2e;
+        color: #7eb8f7;
+        border: 1px solid #2a3145;
+        border-radius: 7px;
+        font-size: 0.83rem;
+        font-weight: 600;
+        text-decoration: none;
+        transition: background 0.3s;
+        margin-top: 8px;
+        cursor: pointer;
+      }
+      .metrics-btn:hover {
+        background: #253050;
+      }
     </style>
   </head>
   <body>
@@ -285,24 +321,27 @@
           <div class="icon">&#128225;</div>
           <div>Waiting for stream&hellip;</div>
         </div>
-        <img
-          id="stream"
-          src="/stream"
-          alt="Live Feed"
-          style="display: none"
-          onload="
-            this.style.display = 'block';
-            document.getElementById('placeholder').style.display = 'none';
-          "
-          onerror="
-            this.style.display = 'none';
-            document.getElementById('placeholder').style.display = 'block';
-            var img = this;
-            setTimeout(function () {
-              img.src = '/stream?' + Date.now();
-            }, 3000);
-          "
-        />
+        <div id="stream-wrap">
+          <img
+            id="stream"
+            src="/stream"
+            alt="Live Feed"
+            style="display: none"
+            onload="
+              this.style.display = 'block';
+              document.getElementById('placeholder').style.display = 'none';
+            "
+            onerror="
+              this.style.display = 'none';
+              document.getElementById('placeholder').style.display = 'block';
+              var img = this;
+              setTimeout(function () {
+                img.src = '/stream?' + Date.now();
+              }, 3000);
+            "
+          />
+          <canvas id="target-overlay"></canvas>
+        </div>
       </div>
 
       <!-- Metrics sidebar -->
@@ -359,6 +398,32 @@
           <div class="mrow">
             <span class="ml">Frames processed</span>
             <span class="mv" id="fc">0</span>
+          </div>
+          <a href="/metrics" download="metrics.txt" class="metrics-btn"
+            >&#8595; Download Metrics</a
+          >
+          <a href="/prediction-csv" download="prediction_log.csv" class="metrics-btn"
+            >&#8595; Download Prediction CSV</a
+          >
+          <a href="/motor-log" download="motor_log.csv" class="metrics-btn"
+            >&#8595; Download Motor Command Log</a
+          >
+        </div>
+
+        <div class="card">
+          <h2>Gimbal Control</h2>
+          <button id="track-btn" class="rec-btn">&#9654; Enable Tracking</button>
+          <div class="mrow" style="margin-top:8px">
+            <span class="ml">Status</span>
+            <span class="mv" id="track-state" style="color:#888">Inactive</span>
+          </div>
+          <div id="debug-target-row" style="margin-top:8px">
+            <div style="font-size:0.72rem;color:#3a5070;margin-bottom:6px">DEBUG &mdash; click on stream to set target</div>
+            <button id="move-target-btn" class="rec-btn" disabled>&#8982; Move to Clicked Target</button>
+            <div class="mrow" style="margin-top:6px">
+              <span class="ml">Clicked</span>
+              <span class="mv" id="clicked-pos" style="color:#888">&mdash;</span>
+            </div>
           </div>
         </div>
 
@@ -483,6 +548,105 @@
         }
 
         connect();
+
+        // ── Tracking ─────────────────────────────────────────────────────────
+        var isTracking = false;
+        $("track-btn").addEventListener("click", function () {
+          var url = isTracking ? "/tracking/disable" : "/tracking/enable";
+          fetch(url, { method: "POST" })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              isTracking = d.tracking === "enabled";
+              var btn = $("track-btn");
+              var state = $("track-state");
+              if (isTracking) {
+                btn.textContent = "\u25a0 Disable Tracking";
+                btn.className = "rec-btn active";
+                state.textContent = "Active";
+                state.style.color = "#4ade80";
+              } else {
+                btn.textContent = "\u25b6 Enable Tracking";
+                btn.className = "rec-btn";
+                state.textContent = "Inactive";
+                state.style.color = "#888";
+              }
+              updateDebugOverlay();
+            })
+            .catch(function () {});
+        });
+
+        // ── Debug click-to-target ─────────────────────────────────────────
+        var debugNx = null, debugNy = null;
+        var overlay = $("target-overlay");
+        var streamImg = $("stream");
+
+        function updateDebugOverlay() {
+          // Overlay only active (clickable) when tracking is disabled
+          if (isTracking) {
+            overlay.className = "";
+            clearOverlay();
+          } else {
+            overlay.className = "active";
+          }
+        }
+        // Apply correct initial state (tracking off by default)
+        updateDebugOverlay();
+
+        function clearOverlay() {
+          var ctx = overlay.getContext("2d");
+          ctx.clearRect(0, 0, overlay.width, overlay.height);
+        }
+
+        function drawCrosshair(nx, ny) {
+          // Sync canvas size to displayed image size
+          overlay.width  = streamImg.offsetWidth  || overlay.offsetWidth;
+          overlay.height = streamImg.offsetHeight || overlay.offsetHeight;
+          var cx = nx * overlay.width;
+          var cy = ny * overlay.height;
+          var ctx = overlay.getContext("2d");
+          ctx.clearRect(0, 0, overlay.width, overlay.height);
+          var r = 14;
+          // Outer circle
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+          ctx.strokeStyle = "rgba(255,80,80,0.9)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          // Cross lines
+          ctx.beginPath();
+          ctx.moveTo(cx - r - 6, cy); ctx.lineTo(cx + r + 6, cy);
+          ctx.moveTo(cx, cy - r - 6); ctx.lineTo(cx, cy + r + 6);
+          ctx.strokeStyle = "rgba(255,80,80,0.9)";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+
+        overlay.addEventListener("click", function (e) {
+          if (isTracking) return; // safety guard
+          var rect = overlay.getBoundingClientRect();
+          var nx = (e.clientX - rect.left) / rect.width;
+          var ny = (e.clientY - rect.top)  / rect.height;
+          debugNx = nx; debugNy = ny;
+          drawCrosshair(nx, ny);
+          $("clicked-pos").textContent =
+            (nx * 100).toFixed(1) + "% \u00d7 " + (ny * 100).toFixed(1) + "%";
+          $("move-target-btn").disabled = false;
+        });
+
+        $("move-target-btn").addEventListener("click", function () {
+          if (debugNx === null || isTracking) return;
+          fetch("/gimbal/target?nx=" + debugNx.toFixed(4) + "&ny=" + debugNy.toFixed(4),
+                { method: "POST" })
+            .then(function () {
+              // Flash button to confirm
+              var btn = $("move-target-btn");
+              btn.textContent = "\u2713 Sent";
+              setTimeout(function () {
+                btn.textContent = "\u2316 Move to Clicked Target";
+              }, 1200);
+            })
+            .catch(function () {});
+        });
 
         // ── Recording ────────────────────────────────────────────────────────
         // Download via hidden iframe — avoids any page navigation that would

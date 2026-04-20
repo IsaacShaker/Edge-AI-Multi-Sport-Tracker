@@ -68,6 +68,8 @@ while [[ $# -gt 0 ]]; do
         --no-viz)     DISPLAY_ENABLED=false; shift ;;
         --web-stream) WEB_STREAM=true; shift ;;
         --port)       WEB_PORT="$2"; shift 2 ;;
+        --color-assist) COLOR_ASSIST=true; shift ;;
+        --raw-detection) RAW_DETECTION=true; shift ;;
         --help)
             grep '^#' "$0" | grep -v '!/bin' | sed 's/^# \{0,1\}//'
             exit 0
@@ -136,8 +138,11 @@ echo "    libcamerasrc: OK"
 # on appsink (usually BGRx) and videoconvert fulfils that request. Having an
 # explicit 'video/x-raw,format=BGR' capsfilter *before* appsink conflicts with
 # whatever format OpenCV writes onto appsink, preventing caps negotiation.
-# af-mode=2 = continuous autofocus (required for Arducam IMX519 motorised lens).
-PIPELINE="libcamerasrc af-mode=2 ! video/x-raw,colorimetry=bt709,format=NV12,width=${CAP_WIDTH},height=${CAP_HEIGHT},framerate=${CAP_FPS}/1 ! queue ! videoconvert ! appsink drop=true max-buffers=2 sync=false"
+# af-mode=2 = continuous autofocus (Arducam IMX519 motorised lens).
+# colorimetry is intentionally omitted: adding bt709 causes a colorspace mismatch
+# in GStreamer's YUV→BGR conversion (it uses BT.601 coefficients by default),
+# which produces a purple/magenta tint on the Arducam IMX219.
+PIPELINE="libcamerasrc af-mode=2 ! video/x-raw,format=NV12,width=${CAP_WIDTH},height=${CAP_HEIGHT},framerate=${CAP_FPS}/1 ! queue ! videoconvert ! appsink drop=true max-buffers=2 sync=false"
 
 echo ">>> Camera pipeline:"
 echo "    $PIPELINE"
@@ -155,6 +160,15 @@ if [ "$WEB_STREAM" = true ]; then
 fi
 
 # ── Environment ───────────────────────────────────────────────────────────────
+# Point libcamera at the stock IMX219 tuning file so the ISP uses the correct
+# color correction matrix for the Arducam IMX219 sensor (fixes purple tint).
+# Try the PiSP (Pi 5) path first, fall back to the VC4 (Pi 4/3) path.
+if [ -f /usr/share/libcamera/ipa/rpi/pisp/imx219.json ]; then
+    export LIBCAMERA_RPI_TUNING_FILE=/usr/share/libcamera/ipa/rpi/pisp/imx219.json
+elif [ -f /usr/share/libcamera/ipa/rpi/vc4/imx219.json ]; then
+    export LIBCAMERA_RPI_TUNING_FILE=/usr/share/libcamera/ipa/rpi/vc4/imx219.json
+fi
+
 if [ "$DISPLAY_ENABLED" = false ]; then
     export DISPLAY=""
 else
@@ -182,6 +196,8 @@ echo "    Motor     : $MOTOR$([ "$MOTOR" = "simplefoc" ] && echo " ($SERIAL_PORT
 echo "    Camera    : libcamerasrc + queue (Arducam IMX519)"
 echo "    Resolution: ${CAP_WIDTH}x${CAP_HEIGHT} @ ${CAP_FPS} fps"
 echo "    Display   : $([ "$DISPLAY_ENABLED" = true ] && echo "enabled" || echo "disabled (headless)")"
+echo "    ColorAssist: $([ "${COLOR_ASSIST:-false}" = true ] && echo "enabled" || echo "disabled")"
+echo "    RawDetection: $([ "${RAW_DETECTION:-false}" = true ] && echo "enabled (bypass Kalman)" || echo "disabled")"
 if [ "$WEB_STREAM" = true ]; then
     PI_IP=$(hostname -I | awk '{print $1}')
     echo "    Web UI    : http://${PI_IP}:${WEB_PORT}"
@@ -198,6 +214,18 @@ else
     MODEL_PATH="$YOLO_MODEL"
 fi
 
+# ── Color-assist flag ────────────────────────────────────────────────────────
+COLOR_ASSIST_FLAG=""
+if [ "${COLOR_ASSIST:-false}" = true ]; then
+    COLOR_ASSIST_FLAG="--color-assist"
+fi
+
+# ── Raw-detection flag ───────────────────────────────────────────────────────
+RAW_DETECTION_FLAG=""
+if [ "${RAW_DETECTION:-false}" = true ]; then
+    RAW_DETECTION_FLAG="--raw-detection"
+fi
+
 # shellcheck disable=SC2086
 if [ -n "$MODEL_PATH" ]; then
     ./bin/tracker_server \
@@ -208,7 +236,9 @@ if [ -n "$MODEL_PATH" ]; then
         --serial-port "$SERIAL_PORT" \
         --camera      "$PIPELINE" \
         $VIZ_FLAG \
-        $STREAM_FLAGS
+        $STREAM_FLAGS \
+        $COLOR_ASSIST_FLAG \
+        $RAW_DETECTION_FLAG
 else
     ./bin/tracker_server \
         --vision      "$VISION" \
@@ -217,5 +247,7 @@ else
         --serial-port "$SERIAL_PORT" \
         --camera      "$PIPELINE" \
         $VIZ_FLAG \
-        $STREAM_FLAGS
+        $STREAM_FLAGS \
+        $COLOR_ASSIST_FLAG \
+        $RAW_DETECTION_FLAG
 fi

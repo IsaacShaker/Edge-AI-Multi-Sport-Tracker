@@ -35,13 +35,21 @@ struct ServerConfig : public Config {
     bool enable_visualization;
     bool enable_web_streaming;
     int web_port;
+    // When true, a ColorBasedDetector runs inline on every camera frame as a
+    // fallback. Hailo/YOLO async results take priority when available.
+    bool color_assist;
+    // Debug: aim at the raw detection centre instead of the Kalman-filtered
+    // position.  Removes smoothing — useful for calibrating motor response.
+    bool use_raw_detection;
     
     ServerConfig()
         : camera_source("0"),
           target_fps(30.0f),
           enable_visualization(true),
           enable_web_streaming(false),
-          web_port(8080) {}
+          web_port(8080),
+          color_assist(false),
+          use_raw_detection(false) {}
 };
 
 /**
@@ -85,6 +93,21 @@ public:
      * @brief Disable ROI optimization (use full-frame search only)
      */
     void disableROI() { use_roi_ = false; }
+
+    /**
+     * @brief Enable/disable active gimbal tracking from the web UI.
+     * Motors will not move until this is set to true AND the ball has been
+     * detected at least once.
+     */
+    void setTrackingActive(bool active) { tracking_active_ = active; }
+    bool isTrackingActive() const { return tracking_active_; }
+
+    /**
+     * @brief Move the gimbal directly to a point in normalised image space.
+     *        nx, ny are in [0, 1] (top-left origin, same as CSS).
+     *        Bypasses tracking gate — intended for debug use only.
+     */
+    void moveGimbalToPixel(float nx, float ny);
     
     /**
      * @brief Check if server is running
@@ -96,9 +119,13 @@ public:
      */
     struct Stats {
         float fps;
+        float inference_latency_ms;  // Avg time per detect() call (hardware speed)
+        float inference_rate;        // Actual detect calls per wall-clock second
         int frames_processed;
         int detections_count;
         float avg_detection_confidence;
+        float detection_rate;       // YOLO hit rate while actively tracking (0-1)
+        float prediction_rmse;      // Kalman one-step prediction RMSE (pixels)
     };
     Stats getStats() const;
 
@@ -106,12 +133,17 @@ private:
     ServerConfig config_;
     
     // Subsystems
-    VisionDetectorPtr vision_;
+    VisionDetectorPtr vision_;           // Primary (hailo/yolo) — runs async
+    VisionDetectorPtr secondary_vision_; // Color assist — runs inline, nullptr if disabled
     StateEstimatorPtr estimator_;
     MotorControllerPtr motor_;
     
     // Control
     std::atomic<bool> running_;
+    // Gimbal tracking is off until the user enables it from the web UI.
+    // Even when enabled, motors won't move until the ball has been seen once
+    // (has_last_prediction_ guards that).
+    std::atomic<bool> tracking_active_{false};
     std::thread tracker_thread_;
 
     // Async detection thread — decouples YOLO inference (~4fps) from capture (30fps)
@@ -125,6 +157,11 @@ private:
     std::mutex detections_mutex_;
     std::vector<Detection> async_detections_;
     bool fresh_detections_{false};
+    // Timestamp of the frame that produced async_detections_; used to
+    // compensate for async lag before feeding results to the Kalman filter.
+    std::chrono::steady_clock::time_point async_detection_capture_time_;
+    // Timestamp written by the camera thread when it submits a frame.
+    std::chrono::steady_clock::time_point pending_detect_time_;
     
     // Statistics
     mutable std::mutex stats_mutex_;
@@ -139,13 +176,31 @@ private:
     
     // Prediction Error Logging
     std::ofstream prediction_log_;
+    // Motor command log — one row per setTargetAngles() call
+    std::ofstream motor_log_;
     EstimatedState last_prediction_;
     bool has_last_prediction_;
     int frame_count_;
 
+    // Prediction RMSE accumulators
+    double prediction_error_sum_sq_;
+    int prediction_error_count_;
+
+    // Frames where estimator was active (ball had been seen before this frame)
+    // Used as denominator for detection rate — excludes frames with no ball present
+    int frames_while_tracking_;
+
+    // Inference timing accumulators (updated in detectLoop, read in getStats)
+    double inference_time_sum_ms_;
+    int    inference_call_count_;
+    std::chrono::steady_clock::time_point session_start_time_;
+
     // Incremental gimbal state — accumulated absolute target sent to firmware
     float current_pan_rad_;
     float current_tilt_rad_;
+    // Wall-clock time of the last motor command — used to scale servo gain by
+    // actual detection interval so stalls don't leave the gimbal frozen.
+    std::chrono::steady_clock::time_point last_motor_cmd_time_;
 
     // Web streaming
     std::unique_ptr<StreamServer> stream_server_;
