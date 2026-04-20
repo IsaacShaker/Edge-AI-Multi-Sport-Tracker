@@ -12,7 +12,11 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <glob.h>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -64,6 +68,19 @@ bool StreamServer::start(int port) {
     accept_thread_ = std::thread(&StreamServer::acceptLoop, this);
 
     std::cout << "[StreamServer] Listening on http://0.0.0.0:" << port_ << "\n";
+
+    // Clean up any leftover clip files from a previous crashed/interrupted session.
+    ::glob_t g{};
+    if (::glob("/tmp/tracker_clip_*.mp4", 0, nullptr, &g) == 0) {
+        for (size_t i = 0; i < g.gl_pathc; ++i) std::remove(g.gl_pathv[i]);
+    }
+    ::globfree(&g);
+    if (::glob("/tmp/tracker_clip_*.avi", 0, nullptr, &g) == 0) {
+        for (size_t i = 0; i < g.gl_pathc; ++i) std::remove(g.gl_pathv[i]);
+    }
+    ::globfree(&g);
+    std::remove("/tmp/tracker_recording_final.mp4");
+
     return true;
 }
 
@@ -100,6 +117,41 @@ void StreamServer::pushFrame(const cv::Mat& frame, int jpeg_quality) {
         ++frame_seq_;
     }
     frame_cv_.notify_all();
+
+    // Write to recording — rotate to a new clip every kClipDurationSecs seconds
+    if (recording_ && !frame.empty()) {
+        std::lock_guard<std::mutex> lk(record_mutex_);
+
+        auto now     = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                           now - clip_start_time_).count();
+
+        // Time to rotate: close current clip, start a new one
+        if (video_writer_.isOpened() && elapsed >= kClipDurationSecs) {
+            video_writer_.release();
+            clip_paths_.push_back(record_path_);
+            ++clip_index_;
+            record_path_     = "/tmp/tracker_clip_" + std::to_string(clip_index_) + ".mp4";
+            clip_start_time_ = now;
+        }
+
+        // Open writer on the first frame of each clip (lazy — need frame dims)
+        if (!video_writer_.isOpened()) {
+            int fourcc = cv::VideoWriter::fourcc('m','p','4','v');
+            video_writer_.open(record_path_, fourcc, 30.0,
+                               cv::Size(frame.cols, frame.rows));
+            if (!video_writer_.isOpened()) {
+                // Fallback to MJPEG in AVI container
+                record_path_ = "/tmp/tracker_clip_" + std::to_string(clip_index_) + ".avi";
+                fourcc = cv::VideoWriter::fourcc('M','J','P','G');
+                video_writer_.open(record_path_, fourcc, 30.0,
+                                   cv::Size(frame.cols, frame.rows));
+            }
+        }
+        if (video_writer_.isOpened()) {
+            video_writer_.write(frame);
+        }
+    }
 }
 
 void StreamServer::pushTelemetry(const TelemetryData& data) {
@@ -139,18 +191,24 @@ void StreamServer::handleClient(int fd) {
     ssize_t n = ::recv(fd, buf, sizeof(buf) - 1, 0);
     if (n <= 0) return;
 
-    // Extract the request path from "GET /path HTTP/1.x"
+    // Extract the HTTP method and request path from "METHOD /path HTTP/1.x"
     std::string req(buf, static_cast<size_t>(n));
-    std::string path = "/";
+    std::string method = "GET";
+    std::string path   = "/";
     auto sp1 = req.find(' ');
     if (sp1 != std::string::npos) {
+        method = req.substr(0, sp1);
         auto sp2 = req.find(' ', sp1 + 1);
         if (sp2 != std::string::npos)
             path = req.substr(sp1 + 1, sp2 - sp1 - 1);
     }
-    // Strip query string
+    // Strip query string — but save it first for endpoints that need params
+    std::string query;
     auto q = path.find('?');
-    if (q != std::string::npos) path = path.substr(0, q);
+    if (q != std::string::npos) {
+        query = path.substr(q + 1);
+        path  = path.substr(0, q);
+    }
 
     if (path == "/" || path == "/index.html") {
         serveStatic(fd);
@@ -160,6 +218,41 @@ void StreamServer::handleClient(int fd) {
         serveSSE(fd);
     } else if (path == "/config") {
         serveConfig(fd);
+    } else if (path == "/metrics") {
+        serveMetrics(fd);
+    } else if (path == "/prediction-csv") {
+        serveCSV(fd);
+    } else if (path == "/motor-log") {
+        serveMotorLog(fd);
+    } else if (path == "/tracking/enable" && method == "POST") {
+        serveTracking(fd, true);
+    } else if (path == "/tracking/disable" && method == "POST") {
+        serveTracking(fd, false);
+    } else if (path == "/gimbal/target" && method == "POST") {
+        // Parse nx=<float>&ny=<float> from the query string
+        float nx = 0.5f, ny = 0.5f;
+        auto parse_param = [&](const std::string& key) -> float {
+            auto pos = query.find(key + "=");
+            if (pos == std::string::npos) return 0.5f;
+            pos += key.size() + 1;
+            auto end = query.find('&', pos);
+            std::string val = (end == std::string::npos)
+                ? query.substr(pos)
+                : query.substr(pos, end - pos);
+            try { return std::stof(val); } catch (...) { return 0.5f; }
+        };
+        nx = parse_param("nx");
+        ny = parse_param("ny");
+        // Clamp to valid range
+        nx = std::max(0.0f, std::min(1.0f, nx));
+        ny = std::max(0.0f, std::min(1.0f, ny));
+        serveGimbalTarget(fd, nx, ny);
+    } else if (path == "/record/start" && method == "POST") {
+        serveRecordStart(fd);
+    } else if (path == "/record/stop" && method == "POST") {
+        serveRecordStop(fd);
+    } else if (path == "/record/download" && method == "GET") {
+        serveRecordDownload(fd);
     } else {
         serve404(fd);
     }
@@ -170,7 +263,9 @@ void StreamServer::handleClient(int fd) {
 bool StreamServer::writeAll(int fd, const void* buf, size_t len) {
     const char* p = static_cast<const char*>(buf);
     while (len > 0) {
-        ssize_t written = ::write(fd, p, len);
+        // MSG_NOSIGNAL: return EPIPE instead of raising SIGPIPE when the
+        // client closes the connection mid-transfer (e.g. after a download).
+        ssize_t written = ::send(fd, p, len, MSG_NOSIGNAL);
         if (written <= 0) return false;
         p   += written;
         len -= static_cast<size_t>(written);
@@ -275,6 +370,247 @@ void StreamServer::serveConfig(int fd) {
     std::string h = hdr.str();
     writeAll(fd, h.data(), h.size());
     writeAll(fd, body.data(), body.size());
+}
+
+void StreamServer::setMetrics(const std::string& text) {
+    std::lock_guard<std::mutex> lk(metrics_mutex_);
+    metrics_text_ = text;
+}
+
+void StreamServer::serveMetrics(int fd) {
+    std::string body;
+    {
+        std::lock_guard<std::mutex> lk(metrics_mutex_);
+        body = metrics_text_.empty() ? "No metrics yet.\n" : metrics_text_;
+    }
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: text/plain; charset=utf-8\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Content-Disposition: attachment; filename=\"metrics.txt\"\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n"
+        << "\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, body.data(), body.size());
+}
+
+void StreamServer::serveTracking(int fd, bool enable) {
+    if (tracking_cb_) tracking_cb_(enable);
+    const char* state = enable ? "enabled" : "disabled";
+    std::string b = std::string("{\"tracking\":\"") + state + "\"}";
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: application/json\r\n"
+        << "Content-Length: " << b.size() << "\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n"
+        << "\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, b.data(), b.size());
+}
+
+void StreamServer::serveGimbalTarget(int fd, float nx, float ny) {
+    if (gimbal_target_cb_) gimbal_target_cb_(nx, ny);
+    std::string b = "{\"ok\":true}";
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: application/json\r\n"
+        << "Content-Length: " << b.size() << "\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n"
+        << "\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, b.data(), b.size());
+}
+
+void StreamServer::serveCSV(int fd) {
+    std::ifstream f("prediction_log.csv", std::ios::binary);
+    std::string body;
+    if (f) {
+        body.assign(std::istreambuf_iterator<char>(f),
+                    std::istreambuf_iterator<char>());
+    }
+    if (body.empty()) {
+        body = "frame,predicted_x,predicted_y,actual_x,actual_y,velocity,error,timestamp_ms\n";
+    }
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: text/csv; charset=utf-8\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Content-Disposition: attachment; filename=\"prediction_log.csv\"\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n"
+        << "\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, body.data(), body.size());
+}
+
+void StreamServer::serveMotorLog(int fd) {
+    std::ifstream f("motor_log.csv", std::ios::binary);
+    std::string body;
+    if (f) {
+        body.assign(std::istreambuf_iterator<char>(f),
+                    std::istreambuf_iterator<char>());
+    }
+    if (body.empty()) {
+        body = "timestamp_ms,pan_rad,tilt_rad,pan_deg,tilt_deg,err_x_px,err_y_px\n";
+    }
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: text/csv; charset=utf-8\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Content-Disposition: attachment; filename=\"motor_log.csv\"\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n"
+        << "\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, body.data(), body.size());
+}
+
+// ── recording ────────────────────────────────────────────────────────────────
+
+void StreamServer::startRecording() {
+    std::lock_guard<std::mutex> lk(record_mutex_);
+    if (video_writer_.isOpened()) video_writer_.release();
+    // Delete leftover clips from any previous session
+    for (const auto& p : clip_paths_) std::remove(p.c_str());
+    std::remove("/tmp/tracker_recording_final.mp4");
+    clip_paths_.clear();
+    clip_index_      = 0;
+    clip_start_time_ = std::chrono::steady_clock::now();
+    record_path_     = "/tmp/tracker_clip_0.mp4";
+    recording_       = true;
+}
+
+void StreamServer::stopRecording() {
+    recording_ = false;
+    std::lock_guard<std::mutex> lk(record_mutex_);
+    if (video_writer_.isOpened()) {
+        video_writer_.release();
+        clip_paths_.push_back(record_path_);  // finalize the last clip
+    }
+}
+
+void StreamServer::serveRecordStart(int fd) {
+    startRecording();
+    const char* body = "{\"recording\":true}";
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: application/json\r\n"
+        << "Content-Length: " << strlen(body) << "\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, body, strlen(body));
+    std::cout << "[StreamServer] Recording started → " << record_path_ << "\n";
+}
+
+void StreamServer::serveRecordStop(int fd) {
+    stopRecording();
+    const char* body = "{\"recording\":false}";
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: application/json\r\n"
+        << "Content-Length: " << strlen(body) << "\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Connection: close\r\n\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+    writeAll(fd, body, strlen(body));
+    std::cout << "[StreamServer] Recording stopped → " << record_path_ << "\n";
+}
+
+void StreamServer::serveRecordDownload(int fd) {
+    if (recording_) {
+        const char* body = "{\"error\":\"Recording in progress — stop first\"}";
+        std::ostringstream hdr;
+        hdr << "HTTP/1.1 409 Conflict\r\n"
+            << "Content-Type: application/json\r\n"
+            << "Content-Length: " << strlen(body) << "\r\n"
+            << "Connection: close\r\n\r\n";
+        std::string h = hdr.str();
+        writeAll(fd, h.data(), h.size());
+        writeAll(fd, body, strlen(body));
+        return;
+    }
+
+    // Snapshot the completed clip list under the lock
+    std::vector<std::string> clips;
+    {
+        std::lock_guard<std::mutex> lk(record_mutex_);
+        clips = clip_paths_;
+    }
+    if (clips.empty()) { serve404(fd); return; }
+
+    // One clip → serve directly.  Multiple clips → stitch first (stream-copy,
+    // no re-encode, so this is fast even for 60+ clips).
+    std::string serve_path;
+    bool is_avi = false;
+    if (clips.size() == 1) {
+        serve_path = clips[0];
+        is_avi = serve_path.size() >= 4 &&
+                 serve_path.substr(serve_path.size() - 4) == ".avi";
+    } else {
+        serve_path = "/tmp/tracker_recording_final.mp4";
+        std::cout << "[StreamServer] Stitching " << clips.size()
+                  << " clip(s) → " << serve_path << "\n";
+        if (!stitchClips(clips, serve_path)) {
+            serve404(fd);
+            return;
+        }
+    }
+
+    std::FILE* f = std::fopen(serve_path.c_str(), "rb");
+    if (!f) { serve404(fd); return; }
+
+    std::fseek(f, 0, SEEK_END);
+    long file_size = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    if (file_size <= 0) { std::fclose(f); serve404(fd); return; }
+
+    const std::string fname = is_avi ? "tracker_recording.avi" : "tracker_recording.mp4";
+    const std::string ctype = is_avi ? "video/x-msvideo" : "video/mp4";
+
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 200 OK\r\n"
+        << "Content-Type: " << ctype << "\r\n"
+        << "Content-Length: " << file_size << "\r\n"
+        << "Content-Disposition: attachment; filename=\"" << fname << "\"\r\n"
+        << "Connection: close\r\n\r\n";
+    std::string h = hdr.str();
+    writeAll(fd, h.data(), h.size());
+
+    std::vector<char> chunk(65536);
+    std::size_t rd;
+    while ((rd = std::fread(chunk.data(), 1, chunk.size(), f)) > 0) {
+        if (!writeAll(fd, chunk.data(), rd)) break;
+    }
+    std::fclose(f);
+}
+
+bool StreamServer::stitchClips(const std::vector<std::string>& clips,
+                                const std::string& output) {
+    // Write an ffmpeg concat list — one 'file' entry per clip
+    const std::string list_path = "/tmp/tracker_concat_list.txt";
+    std::FILE* lf = std::fopen(list_path.c_str(), "w");
+    if (!lf) return false;
+    for (const auto& p : clips)
+        std::fprintf(lf, "file '%s'\n", p.c_str());
+    std::fclose(lf);
+
+    // -c copy: stream-copy without re-encoding — very fast regardless of length
+    std::string cmd = "ffmpeg -y -f concat -safe 0 -i "
+                    + list_path + " -c copy " + output + " 2>/dev/null";
+    int ret = std::system(cmd.c_str());
+    std::remove(list_path.c_str());
+    return ret == 0;
 }
 
 void StreamServer::serve404(int fd) {

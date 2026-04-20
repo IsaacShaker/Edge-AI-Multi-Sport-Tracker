@@ -16,6 +16,11 @@ struct VisionConfig : public Config {
     float confidence_threshold;
     int input_width;
     int input_height;
+    // Horizontal / vertical field of view in degrees — used to convert pixel
+    // error to angular gimbal correction.  Set these to your actual lens FOV.
+    // Arducam IMX219 (standard M12 lens, 1280×720): ~62° H / ~35° V.
+    float hfov_deg;
+    float vfov_deg;
     std::string target_label;        // "sports ball", "person", etc.
     
     // Color-based detection params
@@ -27,6 +32,8 @@ struct VisionConfig : public Config {
         : confidence_threshold(0.20f),
           input_width(640),
           input_height(480),
+          hfov_deg(62.0f),
+          vfov_deg(35.0f),
           target_label("sports ball"),
           model_path("../../models/yolov8n.onnx"),
           hue_min(25), hue_max(45),      // Yellow-green for tennis balls

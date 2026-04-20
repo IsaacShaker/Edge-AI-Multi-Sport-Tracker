@@ -3,6 +3,7 @@
 #include "../include/factories/estimator_factory.h"
 #include "../include/factories/motor_factory.h"
 #include <iostream>
+#include <sstream>
 #include <fstream>
 #include <algorithm>
 #include <cmath>
@@ -17,12 +18,22 @@ TrackerServer::TrackerServer()
       last_detection_size_(100.0f),
       has_last_prediction_(false),
       frame_count_(0),
+      prediction_error_sum_sq_(0.0),
+      prediction_error_count_(0),
+      frames_while_tracking_(0),
+      inference_time_sum_ms_(0.0),
+      inference_call_count_(0),
       current_pan_rad_(0.0f),
       current_tilt_rad_(0.0f) {
     stats_.fps = 0.0f;
+    stats_.inference_latency_ms = 0.0f;
+    stats_.inference_rate = 0.0f;
     stats_.frames_processed = 0;
     stats_.detections_count = 0;
     stats_.avg_detection_confidence = 0.0f;
+    stats_.detection_rate = 0.0f;
+    stats_.prediction_rmse = 0.0f;
+    frames_while_tracking_ = 0;
     search_roi_ = cv::Rect(0, 0, 0, 0);
 }
 
@@ -32,6 +43,9 @@ TrackerServer::~TrackerServer() {
     }
     if (prediction_log_.is_open()) {
         prediction_log_.close();
+    }
+    if (motor_log_.is_open()) {
+        motor_log_.close();
     }
 }
 
@@ -46,6 +60,15 @@ bool TrackerServer::initialize(const ServerConfig& config) {
     if (!vision_) {
         std::cerr << "Failed to create vision detector" << std::endl;
         return false;
+    }
+
+    // Create color-assist detector if requested (and primary isn't already color)
+    if (config_.color_assist && config_.vision.model_type != "color_based") {
+        std::cout << "Creating color-assist detector (inline fallback)" << std::endl;
+        secondary_vision_ = VisionFactory::create("color_based", config.vision);
+        if (!secondary_vision_) {
+            std::cerr << "Warning: Failed to create color-assist detector — continuing without it" << std::endl;
+        }
     }
     
     // Create state estimator
@@ -71,12 +94,20 @@ bool TrackerServer::initialize(const ServerConfig& config) {
     }
     
     // Initialize prediction error logging
-    prediction_log_.open("prediction_log.csv");
+    prediction_log_.open("prediction_log.csv", std::ios::out | std::ios::trunc);
     if (prediction_log_.is_open()) {
         prediction_log_ << "frame,predicted_x,predicted_y,actual_x,actual_y,velocity,error,timestamp_ms\n";
         std::cout << "Prediction logging enabled: prediction_log.csv" << std::endl;
     } else {
         std::cerr << "Warning: Could not open prediction log file" << std::endl;
+    }
+
+    motor_log_.open("motor_log.csv", std::ios::out | std::ios::trunc);
+    if (motor_log_.is_open()) {
+        motor_log_ << "timestamp_ms,pan_rad,tilt_rad,pan_deg,tilt_deg,err_x_px,err_y_px,source\n";
+        std::cout << "Motor command logging enabled: motor_log.csv" << std::endl;
+    } else {
+        std::cerr << "Warning: Could not open motor log file" << std::endl;
     }
 
     // Start web streaming server if enabled
@@ -108,6 +139,16 @@ bool TrackerServer::initialize(const ServerConfig& config) {
               << "\"fps\":"                   << config_.target_fps
               << "}";
             stream_server_->setConfig(j.str());
+            // Register tracking toggle callback so the web UI can gate gimbal movement
+            stream_server_->setTrackingCallback([this](bool en) {
+                setTrackingActive(en);
+                std::cout << "[Tracking] Active tracking " << (en ? "ENABLED" : "DISABLED")
+                          << " by user via web UI" << std::endl;
+            });
+            // Register debug manual-target callback (used when tracking is off)
+            stream_server_->setGimbalTargetCallback([this](float nx, float ny) {
+                moveGimbalToPixel(nx, ny);
+            });
         }
     }
 
@@ -123,6 +164,7 @@ bool TrackerServer::start() {
     
     std::cout << "Starting tracker server..." << std::endl;
     running_ = true;
+    session_start_time_ = std::chrono::steady_clock::now();
     detect_thread_  = std::thread(&TrackerServer::detectLoop,  this);
     tracker_thread_ = std::thread(&TrackerServer::trackerLoop, this);
 
@@ -151,13 +193,52 @@ void TrackerServer::stop() {
     if (tracker_thread_.joinable()) {
         tracker_thread_.join();
     }
-    
-    if (stream_server_) {
-        stream_server_->stop();
-    }
 
     if (motor_) {
         motor_->disconnect();
+    }
+
+    // ── Final metrics summary ──────────────────────────────────────────────
+    {
+        auto s = getStats();
+
+        // Build summary string once — write to stdout, to the web /metrics
+        // endpoint, and to metrics_summary.txt on disk (survives SSH disconnect).
+        std::ostringstream summary;
+        summary << "=== Session Metrics ===\n";
+        summary << "  Detector          : " << config_.vision.model_type << "\n";
+        summary << "  Frames processed  : " << s.frames_processed << "\n";
+        summary << "  Display FPS (avg) : " << s.fps << "\n";
+        summary << "  Inference rate    : " << s.inference_rate
+                << " calls/s  (" << inference_call_count_ << " total calls)\n";
+        summary << "  Avg latency/call  : " << s.inference_latency_ms << " ms\n";
+        summary << "  Avg confidence    : " << s.avg_detection_confidence
+                << "  (detected frames only)\n";
+        if (s.prediction_rmse > 0.0f) {
+            summary << "  Kalman pred RMSE  : " << s.prediction_rmse << " px\n";
+        }
+        summary << "======================\n";
+
+        std::cout << "\n" << summary.str() << "\n";
+
+        // Push to web endpoint before stopping stream server so a browser
+        // request arriving right after Ctrl+C still gets the final data.
+        if (stream_server_) {
+            stream_server_->setMetrics(summary.str());
+        }
+
+        // Also persist to disk next to prediction_log.csv
+        std::ofstream mf("metrics_summary.txt", std::ios::app);
+        if (mf.is_open()) {
+            auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            mf << "# run ended at steady_clock ms=" << now_ms << "\n";
+            mf << summary.str() << "\n";
+        }
+    }
+
+    if (stream_server_) {
+        stream_server_->stop();
     }
 
     std::cout << "Tracker server stopped" << std::endl;
@@ -165,7 +246,24 @@ void TrackerServer::stop() {
 
 TrackerServer::Stats TrackerServer::getStats() const {
     std::lock_guard<std::mutex> lock(stats_mutex_);
-    return stats_;
+    Stats s = stats_;
+    // Use frames_while_tracking_ as denominator: excludes frames before the
+    // ball was ever seen so the rate reflects actual YOLO reliability.
+    s.detection_rate  = (frames_while_tracking_ > 0)
+        ? static_cast<float>(s.detections_count) / static_cast<float>(frames_while_tracking_)
+        : 0.0f;
+    s.prediction_rmse = (prediction_error_count_ > 0)
+        ? static_cast<float>(std::sqrt(prediction_error_sum_sq_ / prediction_error_count_))
+        : 0.0f;
+    s.inference_latency_ms = (inference_call_count_ > 0)
+        ? static_cast<float>(inference_time_sum_ms_ / inference_call_count_)
+        : 0.0f;
+    double elapsed_s = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - session_start_time_).count();
+    s.inference_rate = (elapsed_s > 0.0)
+        ? static_cast<float>(inference_call_count_ / elapsed_s)
+        : 0.0f;
+    return s;
 }
 
 void TrackerServer::detectLoop() {
@@ -173,13 +271,15 @@ void TrackerServer::detectLoop() {
         cv::Mat frame;
         cv::Rect roi;
         bool use_roi = false;
+        std::chrono::steady_clock::time_point capture_time;
         {
             std::unique_lock<std::mutex> lk(frame_mutex_);
             frame_cv_.wait(lk, [this]{ return new_frame_ready_ || !running_; });
             if (!running_) break;
-            frame   = pending_detect_frame_;   // lightweight ref-counted copy
-            roi     = pending_detect_roi_;
-            use_roi = pending_detect_use_roi_;
+            frame        = pending_detect_frame_;   // lightweight ref-counted copy
+            roi          = pending_detect_roi_;
+            use_roi      = pending_detect_use_roi_;
+            capture_time = pending_detect_time_;
             new_frame_ready_ = false;
         }
 
@@ -187,10 +287,22 @@ void TrackerServer::detectLoop() {
         int roi_offset_x = 0;
         int roi_offset_y = 0;
 
+        // Helper lambda: run one detect() call and accumulate wall-clock time.
+        auto timedDetect = [&](const void* data, int w, int h) {
+            auto t0 = std::chrono::steady_clock::now();
+            auto result = vision_->detect(data, w, h);
+            double ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - t0).count();
+            std::lock_guard<std::mutex> lk(stats_mutex_);
+            inference_time_sum_ms_ += ms;
+            inference_call_count_++;
+            return result;
+        };
+
         if (use_roi && roi.width > 0 && roi.height > 0) {
             // Detect on the cropped ROI — much faster than full frame
             cv::Mat crop = frame(roi).clone();
-            dets = vision_->detect(crop.data, crop.cols, crop.rows);
+            dets = timedDetect(crop.data, crop.cols, crop.rows);
 
             // Offset coordinates back to full-frame space
             roi_offset_x = roi.x;
@@ -207,15 +319,16 @@ void TrackerServer::detectLoop() {
             // Full-frame fallback: if ROI detect found nothing, try the whole frame
             // so fast-moving objects that escaped the ROI are still caught.
             if (dets.empty()) {
-                dets = vision_->detect(frame.data, frame.cols, frame.rows);
+                dets = timedDetect(frame.data, frame.cols, frame.rows);
             }
         } else {
-            dets = vision_->detect(frame.data, frame.cols, frame.rows);
+            dets = timedDetect(frame.data, frame.cols, frame.rows);
         }
 
         {
             std::lock_guard<std::mutex> lk(detections_mutex_);
-            async_detections_ = std::move(dets);
+            async_detections_             = std::move(dets);
+            async_detection_capture_time_ = capture_time;
             fresh_detections_ = true;
         }
     }
@@ -269,6 +382,8 @@ void TrackerServer::trackerLoop() {
             std::cerr << "Failed to capture frame" << std::endl;
             continue;
         }
+        // Camera is mounted upside-down — flip vertically (flipCode=0 = around x-axis)
+        cv::flip(frame, frame, 0);
 
         // Feed latest frame + current ROI snapshot to the async detection thread
         // (non-blocking — drops frames that arrive while YOLO is still busy).
@@ -277,6 +392,7 @@ void TrackerServer::trackerLoop() {
             pending_detect_frame_   = frame;
             pending_detect_roi_     = search_roi_;
             pending_detect_use_roi_ = use_roi_;
+            pending_detect_time_    = std::chrono::steady_clock::now();
             new_frame_ready_ = true;
         }
         frame_cv_.notify_one();
@@ -317,6 +433,31 @@ void TrackerServer::trackerLoop() {
             stats_.fps = 1.0f / dt;
             stats_.frames_processed++;
         }
+
+        // Push live metrics to web endpoint every ~2 seconds
+        if (stream_server_ && config_.enable_web_streaming) {
+            static auto last_metrics_push = std::chrono::steady_clock::now();
+            auto now2 = std::chrono::steady_clock::now();
+            if (std::chrono::duration<float>(now2 - last_metrics_push).count() >= 2.0f) {
+                last_metrics_push = now2;
+                auto s = getStats();
+                std::ostringstream m;
+                m << "=== Live Metrics ===\n";
+                m << "  Detector          : " << config_.vision.model_type << "\n";
+                m << "  Frames processed  : " << s.frames_processed << "\n";
+                m << "  Display FPS       : " << s.fps << "\n";
+                m << "  Inference rate    : " << s.inference_rate
+                  << " calls/s  (" << inference_call_count_ << " total calls)\n";
+                m << "  Avg latency/call  : " << s.inference_latency_ms << " ms\n";
+                m << "  Avg confidence    : " << s.avg_detection_confidence
+                  << "  (detected frames only)\n";
+                if (s.prediction_rmse > 0.0f) {
+                    m << "  Kalman pred RMSE  : " << s.prediction_rmse << " px\n";
+                }
+                m << "====================\n";
+                stream_server_->setMetrics(m.str());
+            }
+        }
     }
     
     cap.release();
@@ -332,54 +473,128 @@ void TrackerServer::processFrame(const void* frame_data, int width, int height) 
     // Run detection and tracking
     auto result = detectAndTrack(frame);
     
-    // Send commands to motor using Kalman-filtered current state
-    // This is already the optimal blend of prediction + measurement
-    if (result.has_state) {
-        auto angles = computeGimbalAngles(result.current_state);
+    // Only move the gimbal when the ball is actually detected this frame.
+    // Kalman-predict-only frames (has_state but no detection) would chase the
+    // velocity vector ahead of the ball — skip them.
+    if (result.has_detection && tracking_active_ && has_last_prediction_) {
+        // Debug mode: aim at the raw YOLO bbox centre instead of the
+        // Kalman-smoothed position.  Removes lag/smoothing artifacts.
+        EstimatedState aim_state = result.current_state;
+        if (config_.use_raw_detection) {
+            aim_state.position.x = result.detection.center.x;
+            aim_state.position.y = result.detection.center.y;
+        }
+        auto angles = computeGimbalAngles(aim_state);
         motor_->setTargetAngles(angles);
+        if (motor_log_.is_open()) {
+            float ex = aim_state.position.x - (config_.vision.input_width  / 2.0f);
+            float ey = aim_state.position.y - (config_.vision.input_height / 2.0f);
+            auto ts = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            motor_log_ << ts << ","
+                       << angles.pan  << "," << angles.tilt << ","
+                       << angles.pan  * (180.0f / static_cast<float>(M_PI)) << ","
+                       << angles.tilt * (180.0f / static_cast<float>(M_PI)) << ","
+                       << ex << "," << ey << ",tracker\n";
+            motor_log_.flush();
+        }
     }
 }
 
 GimbalAngles TrackerServer::computeGimbalAngles(const EstimatedState& state) {
-    // Incremental visual servoing — each frame we nudge the accumulated gimbal
-    // angle by a small amount proportional to the pixel error.  This avoids the
-    // oscillation caused by mapping raw pixel position to a new absolute angle
-    // every frame (which creates a closed-loop instability at 30 Hz).
-    //
-    // Tuning knobs:
-    //   GAIN_PAN / GAIN_TILT  — radians per normalised-error per frame.
-    //                           Start small; increase for faster tracking.
-    //   DEAD_ZONE             — fractional half-width (0..1) of the "still" zone.
-    //                           Prevents jitter from detector noise near centre.
+    static constexpr float GAIN_PAN  = 0.15f;
+    static constexpr float GAIN_TILT = 0.10f;
 
-    static constexpr float GAIN_PAN   = 0.015f;  // ~0.86 deg per frame at full error
-    static constexpr float GAIN_TILT  = 0.010f;
-    static constexpr float DEAD_ZONE  = 0.04f;   // 4% of half-frame — ~26 px at 1280
+    static constexpr float PAN_CENTER_RAD  = 5.5f;
+    static constexpr float TILT_CENTER_RAD = 0.0f;
 
-    // Limits (radians) — clamp accumulated state to keep gimbal in safe range
-    static constexpr float PAN_MAX    =  1.57f;  // ±90°
-    static constexpr float TILT_MAX   =  0.79f;  // ±45°
+    static constexpr float PAN_MAX  = 6.5f;
+    static constexpr float PAN_MIN  = 4.5f;
+    static constexpr float TILT_MAX = 1.0f;
+    static constexpr float TILT_MIN = -1.0f;
 
-    float frame_half_x = config_.vision.input_width  / 2.0f;
-    float frame_half_y = config_.vision.input_height / 2.0f;
+    const float width  = static_cast<float>(config_.vision.input_width);
+    const float height = static_cast<float>(config_.vision.input_height);
 
-    // Normalised error: -1 (full left/up) .. +1 (full right/down)
-    float norm_x =  (state.position.x - frame_half_x) / frame_half_x;
-    float norm_y =  (state.position.y - frame_half_y) / frame_half_y;
+    const float hfov_rad = config_.vision.hfov_deg * (static_cast<float>(M_PI) / 180.0f);
+    const float vfov_rad = config_.vision.vfov_deg * (static_cast<float>(M_PI) / 180.0f);
 
-    // Apply dead zone
-    if (std::abs(norm_x) < DEAD_ZONE) norm_x = 0.0f;
-    if (std::abs(norm_y) < DEAD_ZONE) norm_y = 0.0f;
+    const float focal_x_px = (width  / 2.0f) / std::tan(hfov_rad / 2.0f);
+    const float focal_y_px = (height / 2.0f) / std::tan(vfov_rad / 2.0f);
 
-    // Accumulate
-    current_pan_rad_  += GAIN_PAN  * norm_x;
-    current_tilt_rad_ -= GAIN_TILT * norm_y;  // camera Y+ is down; tilt+ is up
+    float err_x = state.position.x - width  / 2.0f;
+    float err_y = state.position.y - height / 2.0f;
 
-    // Clamp to safe range
-    current_pan_rad_  = std::max(-PAN_MAX,  std::min(PAN_MAX,  current_pan_rad_));
-    current_tilt_rad_ = std::max(-TILT_MAX, std::min(TILT_MAX, current_tilt_rad_));
+    // deadband
+    if (std::abs(err_x) < 8.0f) err_x = 0.0f;
+    if (std::abs(err_y) < 8.0f) err_y = 0.0f;
 
-    return GimbalAngles(current_pan_rad_, current_tilt_rad_);
+    // target in absolute actuator frame
+    float target_pan_rad  = PAN_CENTER_RAD  - std::atan2(err_x, focal_x_px);
+    float target_tilt_rad = TILT_CENTER_RAD - std::atan2(err_y, focal_y_px);
+
+    // smooth toward target
+    float pan_rad  = current_pan_rad_  + GAIN_PAN  * (target_pan_rad  - current_pan_rad_);
+    float tilt_rad = current_tilt_rad_ + GAIN_TILT * (target_tilt_rad - current_tilt_rad_);
+
+    pan_rad  = std::clamp(pan_rad,  PAN_MIN,  PAN_MAX);
+    tilt_rad = std::clamp(tilt_rad, TILT_MIN, TILT_MAX);
+
+    current_pan_rad_  = pan_rad;
+    current_tilt_rad_ = tilt_rad;
+
+    return GimbalAngles(pan_rad, tilt_rad);
+}
+
+void TrackerServer::moveGimbalToPixel(float nx, float ny) {
+    // ── Manual-target tuning ──────────────────────────────────────────────
+    // MANUAL_GAIN: fraction of the true angular error applied per click.
+    //   1.0 = jump to exactly the clicked angle (may overshoot if motor
+    //         steps aren't 1:1 with angle).  Reduce if you overshoot.
+    static constexpr float MANUAL_GAIN_PAN  = 0.5f;
+    static constexpr float MANUAL_GAIN_TILT = 0.5f;
+
+    // ── Camera geometry (same as computeGimbalAngles) ─────────────────────
+    const float hfov_rad = config_.vision.hfov_deg * (static_cast<float>(M_PI) / 180.0f);
+    const float focal_px = (config_.vision.input_width / 2.0f) / std::tan(hfov_rad / 2.0f);
+
+    float err_x = (nx - 0.5f) * static_cast<float>(config_.vision.input_width);
+    float err_y = (ny - 0.5f) * static_cast<float>(config_.vision.input_height);
+
+    // Full angular error to the clicked point
+    float target_pan_rad  = -std::atan2(err_x, focal_px);
+    float target_tilt_rad = -std::atan2(err_y, focal_px);
+
+    // Step a fraction of the way from the current accumulator toward target
+    float pan_rad  = current_pan_rad_  + MANUAL_GAIN_PAN  * (target_pan_rad  - current_pan_rad_);
+    float tilt_rad = current_tilt_rad_ + MANUAL_GAIN_TILT * (target_tilt_rad - current_tilt_rad_);
+
+    static constexpr float PAN_MAX  =  6.5f;
+    static constexpr float PAN_MIN  = 4.5f;
+    static constexpr float TILT_MAX =  1.0f;
+    static constexpr float TILT_MIN = -1.0f;
+    pan_rad  = std::clamp(pan_rad,  PAN_MIN,  PAN_MAX);
+    tilt_rad = std::clamp(tilt_rad, TILT_MIN, TILT_MAX);
+
+    // Update accumulated state so re-enabling tracking doesn't jump.
+    current_pan_rad_  = pan_rad;
+    current_tilt_rad_ = tilt_rad;
+
+    GimbalAngles angles(pan_rad, tilt_rad);
+    motor_->setTargetAngles(angles);
+    std::cout << "[Debug] Manual gimbal target nx=" << nx << " ny=" << ny
+              << " pan=" << pan_rad * (180.0f / static_cast<float>(M_PI)) << "\xc2\xb0"
+              << " tilt=" << tilt_rad * (180.0f / static_cast<float>(M_PI)) << "\xc2\xb0\n";
+    if (motor_log_.is_open()) {
+        auto ts = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        motor_log_ << ts << ","
+                   << pan_rad  << "," << tilt_rad << ","
+                   << pan_rad  * (180.0f / static_cast<float>(M_PI)) << ","
+                   << tilt_rad * (180.0f / static_cast<float>(M_PI)) << ","
+                   << err_x << "," << err_y << ",manual\n";
+        motor_log_.flush();
+    }
 }
 
 void TrackerServer::updateSearchROI(const EstimatedState& state, int frame_width, int frame_height) {
@@ -429,16 +644,54 @@ TrackerServer::TrackingResult TrackerServer::detectAndTrack(cv::Mat& frame) {
     result.has_prediction = false;
     result.roi_used = use_roi_ ? search_roi_ : cv::Rect(0, 0, frame.cols, frame.rows);
 
+    // Count frames where the estimator was already active (ball had been seen
+    // at least once before this frame). Used as detection-rate denominator so
+    // frames before the ball was ever put in front of the camera are excluded.
+    if (has_last_prediction_) {
+        frames_while_tracking_++;
+    }
+
     // Pull the latest detections produced by the async detection thread.
-    // When fresh_detections_ is false the detect thread is still busy — we
-    // fall through to the Kalman-predict-only path below.
-    std::vector<Detection> detections;
+    // We also capture the timestamp of the frame they came from so we can
+    // compensate for async lag before feeding the position to Kalman.
+    std::vector<Detection> async_dets;
+    std::chrono::steady_clock::time_point async_capture_time;
     {
         std::lock_guard<std::mutex> lk(detections_mutex_);
         if (fresh_detections_) {
-            detections = async_detections_;
+            async_dets        = async_detections_;
+            async_capture_time = async_detection_capture_time_;
             fresh_detections_ = false;
         }
+    }
+
+    // ── Async lag compensation ────────────────────────────────────────────
+    // Hailo results arrive 1-2 frames late (~8-33 ms).  Project each detected
+    // position forward by lag × current Kalman velocity so the Kalman update
+    // receives "where the ball is now" rather than "where it was when captured".
+    if (!async_dets.empty() && estimator_->isInitialized()) {
+        float lag_s = std::chrono::duration<float>(
+            std::chrono::steady_clock::now() - async_capture_time).count();
+        // Sanity-cap: ignore compensation if lag is unreasonably large (> 500 ms)
+        if (lag_s > 0.0f && lag_s < 0.5f) {
+            auto state = estimator_->getState();
+            for (auto& d : async_dets) {
+                d.center.x += state.velocity.vx * lag_s;
+                d.center.y += state.velocity.vy * lag_s;
+                if (d.has_bbox) {
+                    d.bbox.x += state.velocity.vx * lag_s;
+                    d.bbox.y += state.velocity.vy * lag_s;
+                }
+            }
+        }
+    }
+
+    // ── Detection source selection ────────────────────────────────────────
+    // Hailo (async, lag-compensated) is primary.
+    // Color (inline, zero-lag) is the per-frame fallback when Hailo is busy.
+    std::vector<Detection> detections = std::move(async_dets);
+    if (detections.empty() && secondary_vision_) {
+        detections = secondary_vision_->detect(frame.data, frame.cols, frame.rows);
     }
 
     if (detections.empty()) {
@@ -509,6 +762,10 @@ TrackerServer::TrackingResult TrackerServer::detectAndTrack(cv::Mat& frame) {
         float error_y = result.current_state.position.y - last_prediction_.position.y;
         float error = std::sqrt(error_x * error_x + error_y * error_y);
         
+        // Accumulate for RMSE
+        prediction_error_sum_sq_ += static_cast<double>(error) * static_cast<double>(error);
+        prediction_error_count_++;
+        
         // Calculate velocity magnitude
         float velocity = std::sqrt(
             result.current_state.velocity.vx * result.current_state.velocity.vx +
@@ -542,8 +799,8 @@ TrackerServer::TrackingResult TrackerServer::detectAndTrack(cv::Mat& frame) {
     // Update ROI for next frame
     updateSearchROI(result.current_state, frame.cols, frame.rows);
     
-    // Predict future position for visualization only (150ms look-ahead)
-    const float VIZ_LOOK_AHEAD = 0.15f;
+    // Predict future position for visualization only (250ms look-ahead)
+    const float VIZ_LOOK_AHEAD = 0.25f;
     result.predicted_state = estimator_->predict(VIZ_LOOK_AHEAD);
     result.has_prediction = true;
     
@@ -554,11 +811,30 @@ void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
     // Run core detection and tracking logic
     auto result = detectAndTrack(frame);
 
-    // Send motor commands using Kalman-filtered current state
+    // Only move the gimbal when the ball is actually detected this frame.
+    // Kalman-predict-only frames (has_state but no detection) would chase the
+    // velocity vector ahead of the ball — skip them.
     GimbalAngles angles{0.0f, 0.0f};
-    if (result.has_state) {
-        angles = computeGimbalAngles(result.current_state);
+    if (result.has_detection && tracking_active_ && has_last_prediction_) {
+        EstimatedState aim_state = result.current_state;
+        if (config_.use_raw_detection) {
+            aim_state.position.x = result.detection.center.x;
+            aim_state.position.y = result.detection.center.y;
+        }
+        angles = computeGimbalAngles(aim_state);
         motor_->setTargetAngles(angles);
+        if (motor_log_.is_open()) {
+            float ex = aim_state.position.x - (config_.vision.input_width  / 2.0f);
+            float ey = aim_state.position.y - (config_.vision.input_height / 2.0f);
+            auto ts = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            motor_log_ << ts << ","
+                       << angles.pan  << "," << angles.tilt << ","
+                       << angles.pan  * (180.0f / static_cast<float>(M_PI)) << ","
+                       << angles.tilt * (180.0f / static_cast<float>(M_PI)) << ","
+                       << ex << "," << ey << ",tracker\n";
+            motor_log_.flush();
+        }
     }
     
     // === VISUALIZATION ===
@@ -646,13 +922,23 @@ void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
     
     // Draw stats overlay
     std::string fps_text;
+    std::string infer_text;
     {
         std::lock_guard<std::mutex> lock(stats_mutex_);
-        fps_text = "FPS: " + std::to_string(static_cast<int>(stats_.fps)) + 
-                   " | Detections: " + std::to_string(stats_.detections_count) + 
-                   "/" + std::to_string(stats_.frames_processed);
+        fps_text = "Display FPS: " + std::to_string(static_cast<int>(stats_.fps));
+        double elapsed_s = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - session_start_time_).count();
+        float actual_rate = (elapsed_s > 0.0)
+            ? static_cast<float>(inference_call_count_ / elapsed_s) : 0.0f;
+        float latency_ms = (inference_call_count_ > 0)
+            ? static_cast<float>(inference_time_sum_ms_ / inference_call_count_) : 0.0f;
+        infer_text = "Infer: " + std::to_string(static_cast<int>(actual_rate))
+                   + "fps  " + std::to_string(latency_ms).substr(0, std::to_string(latency_ms).find('.') + 3)
+                   + "ms/call  [" + config_.vision.model_type + "]";
     }
     cv::putText(frame, fps_text, cv::Point(10, 30),
+               cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
+    cv::putText(frame, infer_text, cv::Point(10, 58),
                cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
     
     // Draw velocity info
@@ -664,7 +950,7 @@ void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
         
         std::string vel_text = "Velocity: " + std::to_string(static_cast<int>(velocity_magnitude)) + " px/s";
         cv::putText(frame, vel_text,
-                   cv::Point(10, 60),
+                   cv::Point(10, 88),
                    cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 1);
     }
     
@@ -674,7 +960,7 @@ void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
         roi_status += " | Lost: " + std::to_string(lost_frames_count_);
     }
     cv::putText(frame, roi_status,
-               cv::Point(10, 90),
+               cv::Point(10, 116),
                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 1);
     
     // Draw legend
