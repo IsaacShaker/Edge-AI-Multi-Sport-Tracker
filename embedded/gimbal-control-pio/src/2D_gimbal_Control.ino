@@ -379,6 +379,13 @@ void getInfo(char* cmd){
   SerialDebug.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 }
 
+void getPos(char* cmd){
+  float bottomPos = motorBottom.shaftAngle();
+  float topPos = motorTop.shaftAngle();
+  SerialCM.print("Top Position (Rads): "); SerialCM.print(topPos, 3);
+  SerialCM.print(" | Bottom Position (Rads): "); SerialCM.println(bottomPos, 3);
+}
+
 // --- Save the Current Settings ---
 void saveSettings(char* cmd){
   float pidSet, vSet, homeSet;
@@ -959,6 +966,7 @@ void setup() {
   command.add('Y', bSetPID, "Bottom: P<P> <I> <D>");
   command.add('P', tSetPID, "Top: Y<P> <I> <D>");
   command.add('X', getInfo, "Get Info: X");
+  command.add('Y', getPos, "Get Position: Y");
   command.add('I', recordData, "Record Positional Data: I");
   command.add('K', lock_motors, "Enable Motors: K<0 for Disable, 1 for Enable>");
   command.add('V', setVelocity, "Set Velocity: V<motor (0 for bottom, 1 for top)> <velocity (rad/s)>");
@@ -1039,7 +1047,6 @@ void loop(){
 
   // --- Check Power Limits ---
   // Check current and voltage values at a rate of ~75hz.
-  checkPower = true;
   if(checkPower){
     if (millis() - pow_last_time >= 500) {
       pow_last_time += 500;
