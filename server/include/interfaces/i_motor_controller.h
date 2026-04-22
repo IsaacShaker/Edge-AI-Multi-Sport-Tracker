@@ -59,6 +59,10 @@ public:
      */
     virtual bool disableMotors() = 0;
 
+    virtual void  pollPositionLoop() = 0;
+    virtual float getPanRad()  const = 0;
+    virtual float getTiltRad() const = 0;
+
     /**
      * @brief Set target gimbal angles
      * @param angles Target pan/tilt angles in radians

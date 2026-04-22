@@ -174,6 +174,10 @@ int main(int argc, char** argv) {
                       << " | Frames: " << stats.frames_processed
                       << " | Detections: " << stats.detections_count
                       << " | Avg Conf: " << stats.avg_detection_confidence
+                      << " | Actual Pan: " << stats.actual_pan_rad
+                      << " | Actual Tilt: " << stats.actual_tilt_rad
+                      << " | Target Pan: " << stats.current_pan_rad
+                      << " | Target Tilt: " << stats.current_tilt_rad
                       << std::endl;
             last_stats_time = now;
         }

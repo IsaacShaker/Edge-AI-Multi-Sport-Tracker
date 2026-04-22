@@ -126,6 +126,10 @@ public:
         float avg_detection_confidence;
         float detection_rate;       // YOLO hit rate while actively tracking (0-1)
         float prediction_rmse;      // Kalman one-step prediction RMSE (pixels)
+        float actual_pan_rad;       // Current pan angle in radians (for web UI)
+        float actual_tilt_rad;      // Current tilt angle in radians (for web UI)
+        float current_pan_rad;        // Current target pan angle in radians (for web UI)
+        float current_tilt_rad;       // Current target tilt angle in radians (for web UI)
     };
     Stats getStats() const;
 
@@ -196,8 +200,14 @@ private:
     std::chrono::steady_clock::time_point session_start_time_;
 
     // Incremental gimbal state — accumulated absolute target sent to firmware
+    float actual_pan_rad_;
+    float actual_tilt_rad_;
     float current_pan_rad_;
     float current_tilt_rad_;
+    float prev_ang_err_pan_  = 0.0f;
+    float prev_ang_err_tilt_ = 0.0f;
+    float integral_pan_      = 0.0f;
+    float integral_tilt_     = 0.0f;
     // Wall-clock time of the last motor command — used to scale servo gain by
     // actual detection interval so stalls don't leave the gimbal frozen.
     std::chrono::steady_clock::time_point last_motor_cmd_time_;

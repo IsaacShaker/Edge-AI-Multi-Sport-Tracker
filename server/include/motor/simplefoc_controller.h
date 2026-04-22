@@ -5,6 +5,7 @@
 #include <string>
 #include <mutex>
 #include <atomic>
+#include <thread>
 
 namespace tracker {
 
@@ -30,6 +31,19 @@ public:
     bool home() override;
     bool isReady() const override;
     std::string getType() const override { return "simplefoc"; }
+    // new methods
+    void  pollPositionLoop() override;
+    float getPanRad()  const override;
+    float getTiltRad() const override;
+
+    bool queryPositionOnce(float& pan, float& tilt);
+
+    // new members
+    std::thread              poll_thread_;
+    std::atomic<bool>        poll_running_{false};
+    mutable std::mutex       pos_mutex_;
+    float                    actual_pan_rad_  = 0.0f;
+    float                    actual_tilt_rad_ = 0.0f;
 
 private:
     MotorConfig config_;
