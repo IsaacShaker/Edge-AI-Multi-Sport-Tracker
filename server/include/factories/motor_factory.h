@@ -33,10 +33,10 @@ struct MotorConfig : public Config {
     
     MotorConfig()
         : baudrate(115200),
-          pan_min_rad(-3.14f),
-          pan_max_rad(3.14f),
-          tilt_min_rad(-1.57f),
-          tilt_max_rad(1.57f),
+          pan_min_rad(4.5f),
+          pan_max_rad(6.5f),
+          tilt_min_rad(-1.0f),
+          tilt_max_rad(1.0f),
           kp_pan(1.0f), ki_pan(0.0f), kd_pan(0.0f),
           kp_tilt(1.0f), ki_tilt(0.0f), kd_tilt(0.0f),
           max_pan_velocity(2.0f),

@@ -110,4 +110,16 @@ void MockController::simulateMovement() {
                         std::abs(tilt_diff) > threshold);
 }
 
+void MockController::pollPositionLoop() {
+    simulateMovement();
+}
+
+float MockController::getPanRad() const {
+    return status_.current_angles.pan;
+}
+
+float MockController::getTiltRad() const {
+    return status_.current_angles.tilt;
+}
+
 } // namespace tracker

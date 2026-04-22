@@ -28,6 +28,10 @@ public:
     bool isReady() const override { return connected_; }
     std::string getType() const override { return "mock"; }
 
+    void  pollPositionLoop() override;
+    float getPanRad()  const override;
+    float getTiltRad() const override;
+
 private:
     MotorConfig config_;
     bool connected_;
