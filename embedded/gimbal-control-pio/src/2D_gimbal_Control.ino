@@ -20,10 +20,10 @@
 float target_angle_bottom = 0;        // pan/yaw target (radians)
 float target_angle_top = 0;           // tilt/pitch target (radians)
 
-float target_angle_bottom_min = 4.5;  // pan/yaw target angle minimum
-float target_angle_bottom_max = 6.5;  // pan/yaw target angle maximum
-float target_angle_top_min = -1.0;    // tilt/pitch target angle minimum
-float target_angle_top_max = 1.0;    // tilt/pitch target angle maximum
+float target_angle_bottom_min = 4.0;  // pan/yaw target angle minimum
+float target_angle_bottom_max = 7.0;  // pan/yaw target angle maximum
+float target_angle_top_min = -0.75;    // tilt/pitch target angle minimum
+float target_angle_top_max = 1.5;    // tilt/pitch target angle maximum
 
 float home_angle_bottom = 0;          // pan/yaw target (radians) defualt
 float home_angle_top = 0;             // tilt/pitch target (radians) default
@@ -141,7 +141,6 @@ BLDCDriver3PWM driverTop = BLDCDriver3PWM(PITCH_IN1, PITCH_IN2 , PITCH_IN3, PITC
 //---------------------------------------
 
 Settings settings;  // instantiate the gimbal settings.
-
 
 //---------------------------------------
 //    COMMANDER (Serial Interface)
@@ -867,7 +866,7 @@ void setup() {
     settings.bottom_i = 1.500;
     settings.bottom_d = 0.020;
 
-    settings.top_p = 0.250;
+    settings.top_p = 0.265;
     settings.top_i = 0.800;
     settings.top_d = 0.010;
 
@@ -901,7 +900,7 @@ void setup() {
   motorBottom.PID_velocity.D = settings.bottom_d;
   motorBottom.PID_velocity.output_ramp = 100;
 
-  motorBottom.voltage_limit = 4.0;
+  motorBottom.voltage_limit = 2.3;
   motorBottom.LPF_velocity.Tf = settings.bottom_lpf;
 
   // Angle P controller
@@ -936,7 +935,7 @@ void setup() {
   motorTop.PID_velocity.D = settings.top_d;
   motorTop.PID_velocity.output_ramp = 100;
 
-  motorTop.voltage_limit = 4.0;
+  motorTop.voltage_limit = 2.3;
   motorTop.LPF_velocity.Tf = settings.top_lpf;
 
   // Angle P controller

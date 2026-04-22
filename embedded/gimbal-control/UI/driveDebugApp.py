@@ -613,9 +613,9 @@ class DriveDebugApp(QtWidgets.QWidget):
 
     # Fun programs for demonstration purposes.
     def full_scan_mode(self):
-        yaw_mid = 3.5
+        yaw_mid = 5.5
         yaw_amp = 1.5
-        pitch_mid = 2.15
+        pitch_mid = 0.375
         pitch_amp = 0.65
         steps = 100
         dt = 0.05  # 20 Hz
@@ -630,7 +630,7 @@ class DriveDebugApp(QtWidgets.QWidget):
 
 
     def yaw_scan_mode(self):
-        yaw_mid = 3.5
+        yaw_mid = 5.5
         yaw_amp = 1.5
         steps = 100
         dt = 0.05  # 20 Hz
