@@ -492,7 +492,7 @@ void TrackerServer::processFrame(const void* frame_data, int width, int height) 
             aim_state.position.x = result.detection.center.x;
             aim_state.position.y = result.detection.center.y;
         }
-        auto angles = computeGimbalAngles(aim_state);
+        auto angles = computeGimbalAngles(aim_state, frame.cols, frame.rows);
         motor_->setTargetAngles(angles);
         if (motor_log_.is_open()) {
             float ex = aim_state.position.x - (config_.vision.input_width  / 2.0f);
@@ -509,146 +509,50 @@ void TrackerServer::processFrame(const void* frame_data, int width, int height) 
     }
 }
 
-// GimbalAngles TrackerServer::computeGimbalAngles(const EstimatedState& state) {
-
-//     // ── Config ────────────────────────────────────────────────────────────────
-//     static constexpr float PAN_MAX     = 7.0f;
-//     static constexpr float PAN_MIN     = 4.0f;
-//     static constexpr float TILT_MAX    = 1.5f;
-//     static constexpr float TILT_MIN    = -0.75f;
-//     static constexpr float DEADBAND_PX = 8.0f;
-
-//     static constexpr float KP_PAN   = 0.06f;
-//     static constexpr float KP_TILT  = 0.06f;
-//     static constexpr float KI_PAN   = 0.002f;
-//     static constexpr float KI_TILT  = 0.002f;
-//     static constexpr float KD_PAN   = 0.08f;
-//     static constexpr float KD_TILT  = 0.08f;
-//     static constexpr float I_MAX    = 0.5f;
-
-//     static constexpr float MAX_RATE_PAN  = 0.08f;
-//     static constexpr float MAX_RATE_TILT = 0.08f;
-
-//     // ── Poll real positions from embedded controller ───────────────────────────
-//     // This closes the loop properly — if the gimbal didn't reach where we
-//     // commanded, the error and integral reflect reality instead of our estimate.
-//     // motor_->pollPositionLoop();
-//     const float actual_pan_rad  = motor_->getPanRad();
-//     const float actual_tilt_rad = motor_->getTiltRad();
-//     actual_pan_rad_ = actual_pan_rad;
-//     actual_tilt_rad_ = actual_tilt_rad;
-
-//     // ── Camera geometry ───────────────────────────────────────────────────────
-//     const float width      = static_cast<float>(config_.vision.input_width);
-//     const float height     = static_cast<float>(config_.vision.input_height);
-//     const float hfov_rad   = config_.vision.hfov_deg * (M_PI / 180.0f);
-//     const float vfov_rad   = config_.vision.vfov_deg * (M_PI / 180.0f);
-//     const float focal_x_px = (width  / 2.0f) / std::tan(hfov_rad / 2.0f);
-//     const float focal_y_px = (height / 2.0f) / std::tan(vfov_rad / 2.0f);
-
-//     // ── Pixel error from image centre ─────────────────────────────────────────
-//     float err_x = state.position.x - width  / 2.0f;
-//     float err_y = state.position.y - height / 2.0f;
-//     if (std::abs(err_x) < DEADBAND_PX) err_x = 0.0f;
-//     if (std::abs(err_y) < DEADBAND_PX) err_y = 0.0f;
-
-//     // ── Angular error ─────────────────────────────────────────────────────────
-//     const float ang_err_pan  = -std::atan2(err_x, focal_x_px);
-//     const float ang_err_tilt = -std::atan2(err_y, focal_y_px);
-
-//     // ── Integral ──────────────────────────────────────────────────────────────
-//     if (ang_err_pan  * integral_pan_  < 0.0f) integral_pan_  = 0.0f;
-//     if (ang_err_tilt * integral_tilt_ < 0.0f) integral_tilt_ = 0.0f;
-//     integral_pan_  = std::clamp(integral_pan_  + ang_err_pan,  -I_MAX, I_MAX);
-//     integral_tilt_ = std::clamp(integral_tilt_ + ang_err_tilt, -I_MAX, I_MAX);
-
-//     // ── Derivative ────────────────────────────────────────────────────────────
-//     const float d_pan  = ang_err_pan  - prev_ang_err_pan_;
-//     const float d_tilt = ang_err_tilt - prev_ang_err_tilt_;
-//     prev_ang_err_pan_  = ang_err_pan;
-//     prev_ang_err_tilt_ = ang_err_tilt;
-
-//     // ── PID output ────────────────────────────────────────────────────────────
-//     float rate_pan  = KP_PAN  * ang_err_pan  + KI_PAN  * integral_pan_  + KD_PAN  * d_pan;
-//     float rate_tilt = KP_TILT * ang_err_tilt + KI_TILT * integral_tilt_ + KD_TILT * d_tilt;
-
-//     // ── Rate limit ────────────────────────────────────────────────────────────
-//     rate_pan  = std::clamp(rate_pan,  -MAX_RATE_PAN,  MAX_RATE_PAN);
-//     rate_tilt = std::clamp(rate_tilt, -MAX_RATE_TILT, MAX_RATE_TILT);
-
-//     // ── Compute target from ACTUAL position, not estimated ────────────────────
-//     // This is the key benefit of polling — commanded target reflects where the
-//     // gimbal really is, not where we think it should be.
-//     float pan_rad  = std::clamp(actual_pan_rad  + rate_pan,  PAN_MIN,  PAN_MAX);
-//     float tilt_rad = std::clamp(actual_tilt_rad + rate_tilt, TILT_MIN, TILT_MAX);
-
-//     // Keep estimates in sync with reality for any code that reads them
-//     current_pan_rad_  = pan_rad;
-//     current_tilt_rad_ = tilt_rad;
-
-//     return GimbalAngles(pan_rad, tilt_rad);
-// }
-
-// GimbalAngles TrackerServer::computeGimbalAngles(const EstimatedState& state) {
-//     static constexpr float PAN_MAX     = 7.0f;
-//     static constexpr float PAN_MIN     = 4.0f;
-//     static constexpr float TILT_MAX    = 1.5f;
-//     static constexpr float TILT_MIN    = -0.75f;
-//     static constexpr float DEADBAND_PX = 2.0f;
-
-//     static constexpr float KP_PAN  = 0.4f;
-//     static constexpr float KP_TILT = 0.4f;
-
-//     const float actual_pan_rad  = motor_->getPanRad();
-//     const float actual_tilt_rad = motor_->getTiltRad();
-
-//     const float width      = static_cast<float>(config_.vision.input_width);
-//     const float height     = static_cast<float>(config_.vision.input_height);
-//     const float hfov_rad   = config_.vision.hfov_deg * (M_PI / 180.0f);
-//     const float vfov_rad   = config_.vision.vfov_deg * (M_PI / 180.0f);
-//     const float focal_x_px = (width  / 2.0f) / std::tan(hfov_rad / 2.0f);
-//     const float focal_y_px = (height / 2.0f) / std::tan(vfov_rad / 2.0f);
-
-//     float err_x = state.position.x - width  / 2.0f;
-//     float err_y = state.position.y - height / 2.0f;
-
-//     if (std::abs(err_x) < DEADBAND_PX) err_x = 0.0f;
-//     if (std::abs(err_y) < DEADBAND_PX) err_y = 0.0f;
-
-//     const float ang_err_pan  = -std::atan2(err_x, focal_x_px);
-//     const float ang_err_tilt = -std::atan2(err_y, focal_y_px);
-
-//     float corr_pan  = KP_PAN  * ang_err_pan;
-//     float corr_tilt = KP_TILT * ang_err_tilt;
-
-//     float pan_rad  = std::clamp(actual_pan_rad  + corr_pan,  PAN_MIN,  PAN_MAX);
-//     float tilt_rad = std::clamp(actual_tilt_rad + corr_tilt, TILT_MIN, TILT_MAX);
-
-//     current_pan_rad_  = pan_rad;
-//     current_tilt_rad_ = tilt_rad;
-
-//     return GimbalAngles(pan_rad, tilt_rad);
-// }
-
-GimbalAngles TrackerServer::computeGimbalAngles(const EstimatedState& state) {
+GimbalAngles TrackerServer::computeGimbalAngles(
+    const EstimatedState& state,
+    int frame_width,
+    int frame_height)
+{
     static constexpr float PAN_MAX     = 7.0f;
     static constexpr float PAN_MIN     = 4.0f;
     static constexpr float TILT_MAX    = 1.5f;
     static constexpr float TILT_MIN    = -0.75f;
     static constexpr float DEADBAND_PX = 2.0f;
 
-    static constexpr float KP_PAN  = 0.4f;
+    static constexpr float KP_PAN  = 0.40f;
     static constexpr float KI_PAN  = 0.03f;
+    static constexpr float KD_PAN  = 0.04f;
 
-    static constexpr float KP_TILT = 0.4f;
+    static constexpr float KP_TILT = 0.40f;
+    static constexpr float KI_TILT = 0.02f;
+    static constexpr float KD_TILT = 0.03f;
 
-    static constexpr float I_PAN_MAX = 0.25f;
+    static constexpr float I_PAN_MAX  = 0.25f;
+    static constexpr float I_TILT_MAX = 0.20f;
+
+    static constexpr float D_FILTER_ALPHA = 0.2f;  // 0..1, lower = smoother
+    static constexpr float MAX_CORR_PAN   = 0.15f;
+    static constexpr float MAX_CORR_TILT  = 0.12f;
+
+    using clock = std::chrono::steady_clock;
+    const auto now = clock::now();
+
+    if (last_control_time_.time_since_epoch().count() == 0) {
+        last_control_time_ = now;
+    }
+
+    float dt = std::chrono::duration<float>(now - last_control_time_).count();
+    last_control_time_ = now;
+
+    // protect against tiny/huge dt spikes
+    dt = std::clamp(dt, 0.01f, 0.1f);
 
     const float actual_pan_rad  = motor_->getPanRad();
     const float actual_tilt_rad = motor_->getTiltRad();
 
-    const float width      = static_cast<float>(config_.vision.input_width);
-    const float height     = static_cast<float>(config_.vision.input_height);
+    const float width      = static_cast<float>(frame_width);
+    const float height     = static_cast<float>(frame_height);
     const float hfov_rad   = config_.vision.hfov_deg * (M_PI / 180.0f);
     const float vfov_rad   = config_.vision.vfov_deg * (M_PI / 180.0f);
     const float focal_x_px = (width  / 2.0f) / std::tan(hfov_rad / 2.0f);
@@ -663,15 +567,48 @@ GimbalAngles TrackerServer::computeGimbalAngles(const EstimatedState& state) {
     const float ang_err_pan  = -std::atan2(err_x, focal_x_px);
     const float ang_err_tilt = -std::atan2(err_y, focal_y_px);
 
-    // simple integral for pan
+    // reset integral when error changes sign
     if (ang_err_pan * integral_pan_ < 0.0f) {
         integral_pan_ = 0.0f;
     }
-    integral_pan_ += ang_err_pan;
-    integral_pan_ = std::clamp(integral_pan_, -I_PAN_MAX, I_PAN_MAX);
+    if (ang_err_tilt * integral_tilt_ < 0.0f) {
+        integral_tilt_ = 0.0f;
+    }
 
-    float corr_pan  = KP_PAN * ang_err_pan + KI_PAN * integral_pan_;
-    float corr_tilt = KP_TILT * ang_err_tilt;
+    // only integrate when outside deadband
+    if (ang_err_pan != 0.0f) {
+        integral_pan_ += ang_err_pan * dt;
+        integral_pan_ = std::clamp(integral_pan_, -I_PAN_MAX, I_PAN_MAX);
+    }
+
+    if (ang_err_tilt != 0.0f) {
+        integral_tilt_ += ang_err_tilt * dt;
+        integral_tilt_ = std::clamp(integral_tilt_, -I_TILT_MAX, I_TILT_MAX);
+    }
+
+    // raw derivative
+    float d_pan_raw  = (ang_err_pan  - prev_ang_err_pan_)  / dt;
+    float d_tilt_raw = (ang_err_tilt - prev_ang_err_tilt_) / dt;
+
+    prev_ang_err_pan_  = ang_err_pan;
+    prev_ang_err_tilt_ = ang_err_tilt;
+
+    // low-pass filter derivative
+    deriv_pan_filt_  = D_FILTER_ALPHA * d_pan_raw  + (1.0f - D_FILTER_ALPHA) * deriv_pan_filt_;
+    deriv_tilt_filt_ = D_FILTER_ALPHA * d_tilt_raw + (1.0f - D_FILTER_ALPHA) * deriv_tilt_filt_;
+
+    float corr_pan =
+        KP_PAN * ang_err_pan +
+        KI_PAN * integral_pan_ +
+        KD_PAN * deriv_pan_filt_;
+
+    float corr_tilt =
+        KP_TILT * ang_err_tilt +
+        KI_TILT * integral_tilt_ +
+        KD_TILT * deriv_tilt_filt_;
+
+    corr_pan  = std::clamp(corr_pan,  -MAX_CORR_PAN,  MAX_CORR_PAN);
+    corr_tilt = std::clamp(corr_tilt, -MAX_CORR_TILT, MAX_CORR_TILT);
 
     float pan_rad  = std::clamp(actual_pan_rad  + corr_pan,  PAN_MIN,  PAN_MAX);
     float tilt_rad = std::clamp(actual_tilt_rad + corr_tilt, TILT_MIN, TILT_MAX);
@@ -957,7 +894,7 @@ void TrackerServer::processFrameWithVisualization(cv::Mat& frame) {
             aim_state.position.x = result.detection.center.x;
             aim_state.position.y = result.detection.center.y;
         }
-        angles = computeGimbalAngles(aim_state);
+        angles = computeGimbalAngles(aim_state, frame.cols, frame.rows);
         motor_->setTargetAngles(angles);
         if (motor_log_.is_open()) {
             float ex = aim_state.position.x - (config_.vision.input_width  / 2.0f);

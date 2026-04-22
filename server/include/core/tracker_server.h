@@ -204,13 +204,17 @@ private:
     float actual_tilt_rad_;
     float current_pan_rad_;
     float current_tilt_rad_;
-    float prev_ang_err_pan_  = 0.0f;
+
+    float integral_pan_ = 0.0f;
+    float integral_tilt_ = 0.0f;
+
+    float prev_ang_err_pan_ = 0.0f;
     float prev_ang_err_tilt_ = 0.0f;
-    float integral_pan_      = 0.0f;
-    float integral_tilt_     = 0.0f;
-    // Wall-clock time of the last motor command — used to scale servo gain by
-    // actual detection interval so stalls don't leave the gimbal frozen.
-    std::chrono::steady_clock::time_point last_motor_cmd_time_;
+
+    float deriv_pan_filt_ = 0.0f;
+    float deriv_tilt_filt_ = 0.0f;
+
+    std::chrono::steady_clock::time_point last_control_time_{};
 
     // Web streaming
     std::unique_ptr<StreamServer> stream_server_;
@@ -266,7 +270,7 @@ private:
     /**
      * @brief Compute gimbal angles from estimated state
      */
-    GimbalAngles computeGimbalAngles(const EstimatedState& state);
+    GimbalAngles computeGimbalAngles(const EstimatedState& state, int frame_width, int frame_height);
 };
 
 } // namespace tracker
