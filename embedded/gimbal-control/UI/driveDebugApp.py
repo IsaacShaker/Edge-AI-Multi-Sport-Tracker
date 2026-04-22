@@ -566,7 +566,7 @@ class DriveDebugApp(QtWidgets.QWidget):
             p = float(self.ui.yProportional.value())
             i = float(self.ui.yIntegral.value())
             d = float(self.ui.yDerivative.value())
-            self.write_line(f"Y{p:.3f} {i:.3f} {d:.3f}")
+            self.write_line(f"Z{p:.3f} {i:.3f} {d:.3f}")
 
     def send_velocity(self, axis: str) -> None:
         # Send a velocity command to either bottom or top motor using serial.

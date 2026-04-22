@@ -381,8 +381,10 @@ void getInfo(char* cmd){
 void getPos(char* cmd){
   float bottomPos = motorBottom.shaftAngle();
   float topPos = motorTop.shaftAngle();
-  SerialCM.print("Top Position (Rads): "); SerialCM.print(topPos, 3);
-  SerialCM.print(" | Bottom Position (Rads): "); SerialCM.println(bottomPos, 3);
+  SerialCM.print("POS,");
+  SerialCM.print(topPos, 3);
+  SerialCM.print(",");
+  SerialCM.println(bottomPos, 3);
 }
 
 // --- Save the Current Settings ---
@@ -962,8 +964,8 @@ void setup() {
   command.add('T', doTargetTop, "top/tilt angle (rad), relative?");
   command.add('M', doTargetBoth, "both: M<pan> <tilt>");
   command.add('H', homeMotors, "Home: H");
-  command.add('Y', bSetPID, "Bottom: P<P> <I> <D>");
-  command.add('P', tSetPID, "Top: Y<P> <I> <D>");
+  command.add('Z', bSetPID, "Bottom: Z<P> <I> <D>");
+  command.add('P', tSetPID, "Top: P<P> <I> <D>");
   command.add('X', getInfo, "Get Info: X");
   command.add('Y', getPos, "Get Position: Y");
   command.add('I', recordData, "Record Positional Data: I");
