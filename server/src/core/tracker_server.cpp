@@ -589,15 +589,60 @@ void TrackerServer::processFrame(const void* frame_data, int width, int height) 
 //     return GimbalAngles(pan_rad, tilt_rad);
 // }
 
+// GimbalAngles TrackerServer::computeGimbalAngles(const EstimatedState& state) {
+//     static constexpr float PAN_MAX     = 7.0f;
+//     static constexpr float PAN_MIN     = 4.0f;
+//     static constexpr float TILT_MAX    = 1.5f;
+//     static constexpr float TILT_MIN    = -0.75f;
+//     static constexpr float DEADBAND_PX = 2.0f;
+
+//     static constexpr float KP_PAN  = 0.4f;
+//     static constexpr float KP_TILT = 0.4f;
+
+//     const float actual_pan_rad  = motor_->getPanRad();
+//     const float actual_tilt_rad = motor_->getTiltRad();
+
+//     const float width      = static_cast<float>(config_.vision.input_width);
+//     const float height     = static_cast<float>(config_.vision.input_height);
+//     const float hfov_rad   = config_.vision.hfov_deg * (M_PI / 180.0f);
+//     const float vfov_rad   = config_.vision.vfov_deg * (M_PI / 180.0f);
+//     const float focal_x_px = (width  / 2.0f) / std::tan(hfov_rad / 2.0f);
+//     const float focal_y_px = (height / 2.0f) / std::tan(vfov_rad / 2.0f);
+
+//     float err_x = state.position.x - width  / 2.0f;
+//     float err_y = state.position.y - height / 2.0f;
+
+//     if (std::abs(err_x) < DEADBAND_PX) err_x = 0.0f;
+//     if (std::abs(err_y) < DEADBAND_PX) err_y = 0.0f;
+
+//     const float ang_err_pan  = -std::atan2(err_x, focal_x_px);
+//     const float ang_err_tilt = -std::atan2(err_y, focal_y_px);
+
+//     float corr_pan  = KP_PAN  * ang_err_pan;
+//     float corr_tilt = KP_TILT * ang_err_tilt;
+
+//     float pan_rad  = std::clamp(actual_pan_rad  + corr_pan,  PAN_MIN,  PAN_MAX);
+//     float tilt_rad = std::clamp(actual_tilt_rad + corr_tilt, TILT_MIN, TILT_MAX);
+
+//     current_pan_rad_  = pan_rad;
+//     current_tilt_rad_ = tilt_rad;
+
+//     return GimbalAngles(pan_rad, tilt_rad);
+// }
+
 GimbalAngles TrackerServer::computeGimbalAngles(const EstimatedState& state) {
     static constexpr float PAN_MAX     = 7.0f;
     static constexpr float PAN_MIN     = 4.0f;
     static constexpr float TILT_MAX    = 1.5f;
     static constexpr float TILT_MIN    = -0.75f;
-    static constexpr float DEADBAND_PX = 8.0f;
+    static constexpr float DEADBAND_PX = 2.0f;
 
     static constexpr float KP_PAN  = 0.4f;
+    static constexpr float KI_PAN  = 0.03f;
+
     static constexpr float KP_TILT = 0.4f;
+
+    static constexpr float I_PAN_MAX = 0.25f;
 
     const float actual_pan_rad  = motor_->getPanRad();
     const float actual_tilt_rad = motor_->getTiltRad();
@@ -618,7 +663,14 @@ GimbalAngles TrackerServer::computeGimbalAngles(const EstimatedState& state) {
     const float ang_err_pan  = -std::atan2(err_x, focal_x_px);
     const float ang_err_tilt = -std::atan2(err_y, focal_y_px);
 
-    float corr_pan  = KP_PAN  * ang_err_pan;
+    // simple integral for pan
+    if (ang_err_pan * integral_pan_ < 0.0f) {
+        integral_pan_ = 0.0f;
+    }
+    integral_pan_ += ang_err_pan;
+    integral_pan_ = std::clamp(integral_pan_, -I_PAN_MAX, I_PAN_MAX);
+
+    float corr_pan  = KP_PAN * ang_err_pan + KI_PAN * integral_pan_;
     float corr_tilt = KP_TILT * ang_err_tilt;
 
     float pan_rad  = std::clamp(actual_pan_rad  + corr_pan,  PAN_MIN,  PAN_MAX);
